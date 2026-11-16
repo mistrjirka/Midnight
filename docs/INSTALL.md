@@ -1,116 +1,124 @@
-# Install or update Midnight
+# Install Midnight
 
-Midnight supports nine Canon EOS models. Check the camera and firmware version below. **Only the 600D has substantial user-reported runtime testing.** New ports are experimental.
+Midnight adds astronomy tools to **Magic Lantern** on supported Canon EOS cameras. It does not replace Canon's firmware.
 
-**Already have working Magic Lantern?** Install the *module-only* ZIP. It updates `ML/modules/astro.mo` and the matching `ML/ASTRO/` catalogues without changing `autoexec.bin`, your camera firmware, the card boot flags, photographs, or existing ML settings.
+**Choose the path that matches your camera:**
 
-[Latest experimental release: v0.5.0-alpha.1](https://github.com/mistrjirka/midnight/releases/tag/v0.5.0-alpha.1)
+## Contents
 
-## 1. Choose the right download
+- [A. Fresh camera: install Magic Lantern and Midnight](#a-fresh-camera-install-magic-lantern-and-midnight)
+- [B. Magic Lantern already installed: add Midnight](#b-magic-lantern-already-installed-add-midnight)
+- [Supported cameras and downloads](#supported-cameras-and-downloads)
+- [Check that Midnight works](#check-that-midnight-works)
+- [Troubleshooting](#troubleshooting)
+- [Restore your previous setup](#restore-your-previous-setup)
 
-First check your camera's **Firmware Ver.** in the Canon menu.
+> **Experimental software.** The 600D has user-reported camera testing, but the other supported models still need physical-camera validation. Keep a backup. Use a spare card for a first installation. Do not test lens autofocus or unattended mount movement until you have verified your camera.
 
-| Camera / firmware | Existing compatible Magic Lantern card (recommended) | Full Magic Lantern installation |
-| --- | --- | --- |
-| EOS 550D, **1.0.9** | [midnight-module-550D.109.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-550D.109.zip) | [magiclantern-astro-550D.109.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-550D.109.zip) |
-| EOS 600D, **1.0.2** | [midnight-module-600D.102.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-600D.102.zip) | [magiclantern-astro-600D.102.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-600D.102.zip) |
-| EOS 650D, **1.0.4** | [midnight-module-650D.104.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-650D.104.zip) | [magiclantern-astro-650D.104.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-650D.104.zip) |
-| EOS 700D, **1.1.5** | [midnight-module-700D.115.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-700D.115.zip) | [magiclantern-astro-700D.115.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-700D.115.zip) |
-| EOS 100D, **1.0.1** | [midnight-module-100D.101.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-100D.101.zip) | [magiclantern-astro-100D.101.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-100D.101.zip) |
-| EOS 60D, **1.1.1** | [midnight-module-60D.111.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-60D.111.zip) | [magiclantern-astro-60D.111.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-60D.111.zip) |
-| EOS 1100D, **1.0.5** | [midnight-module-1100D.105.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-1100D.105.zip) | [magiclantern-astro-1100D.105.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-1100D.105.zip) |
-| EOS 70D, **1.1.2** | [midnight-module-70D.112.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-70D.112.zip) | [magiclantern-astro-70D.112.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-70D.112.zip) |
-| EOS 6D, **1.1.6** | [midnight-module-6D.116.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-6D.116.zip) | [magiclantern-astro-6D.116.zip](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-6D.116.zip) |
+## Supported cameras and downloads
 
-**100D, 650D, 60D, 1100D and 70D:** read the [new-camera testing guide](EASY_CAMERA_PORTS.md) before installing. **550D and 700D:** see their [550D](550D_PORT.md) and [700D](700D_PORT.md) guides. All these ports need on-camera validation.
+On your camera, open the **Canon Menu**, find **Firmware Ver.** (under the wrench/settings tabs), and read the number. **Your model and Canon firmware must both match** a row below. If they do not, stop. Do not try a different camera's ZIP.
 
-**Controls:** in photo playback, use **Q → SET** to solve. On the **100D**, use the **Av / exposure-compensation button** as Midnight's Q action, then SET. Magic Lantern maps this differently because the 100D shares the Q and SET physical control. No button programming or codes are required.
+These files are from [Midnight v0.5.0-alpha.1](https://github.com/mistrjirka/midnight/releases/tag/v0.5.0-alpha.1).
 
-**Never install an archive for another camera or firmware version.** The *full* ZIP also carries camera-specific `autoexec.bin` and `ML-SETUP.FIR`. Use it only when you are setting up a compatible spare card and understand Magic Lantern's boot-card procedure.
+| Camera | Canon firmware | Fresh installation: full ZIP | Existing Magic Lantern: module-only ZIP |
+| --- | --- | --- | --- |
+| EOS 100D | **1.0.1** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-100D.101.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-100D.101.zip) |
+| EOS 550D | **1.0.9** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-550D.109.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-550D.109.zip) |
+| EOS 600D | **1.0.2** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-600D.102.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-600D.102.zip) |
+| EOS 650D | **1.0.4** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-650D.104.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-650D.104.zip) |
+| EOS 700D | **1.1.5** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-700D.115.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-700D.115.zip) |
+| EOS 1100D | **1.0.5** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-1100D.105.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-1100D.105.zip) |
+| EOS 60D | **1.1.1** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-60D.111.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-60D.111.zip) |
+| EOS 70D | **1.1.2** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-70D.112.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-70D.112.zip) |
+| EOS 6D | **1.1.6** | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-6D.116.zip) | [Download](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/midnight-module-6D.116.zip) |
 
-The optional [wide-field sky index](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-wide-index.zip) is only useful for very wide fields (roughly above 60°). You do not need it for most telescope lenses.
+**Full ZIP** = Magic Lantern boot files plus Midnight. Use it when preparing a first Magic Lantern installation. **Module-only ZIP** = Midnight and its sky data. Use it when Magic Lantern already works.
 
-## 2. Update an existing Magic Lantern card
+## A. Fresh camera: install Magic Lantern and Midnight
 
-1. Switch off the camera. When its activity light is off, remove the SD card.
-2. Connect the card to a reliable reader. If the reader disconnects repeatedly or the filesystem reports errors, **stop**. Do not write to an unstable connection.
-3. **Back up the complete `ML/` directory and `autoexec.bin` to your computer.** Back up your `DCIM/` photos separately if they are not already safe.
-4. Download the **module-only** ZIP from the table above.
-5. Open the ZIP. **Extract its contents to the root of the card**, not inside a new directory. Accept replacement of the existing `ML/modules/astro.mo` and matching `ML/ASTRO/` files.
-6. Wait for copying to finish, then **safely eject or unmount** the SD card.
-7. Insert the card and start the camera. In Magic Lantern, press **Trash/Delete → Focus → Midnight**.
-8. If Midnight is not listed, open **Magic Lantern → Modules**, enable **astro**, and restart the camera.
+Use this path if **Magic Lantern does not already start on your camera**.
 
-The card should contain:
+### What you need
 
-```text
-SD card/
-├── autoexec.bin                 (existing file: DO NOT replace during module update)
-└── ML/
-    ├── modules/
-    │   └── astro.mo             (updated)
-    ├── SETTINGS/
-    │   └── astro.en             (module enabled)
-    └── ASTRO/
-        ├── SKY.DIR
-        ├── SKY.PAT
-        ├── SKY.FLD
-        ├── STARS.BIN / STARS.IDX / STARS.NAM
-        ├── DSO.BIN / DSO.KEY / DSO.NAM
-        ├── CONST.BIN
-        └── TEST.PGM
-```
+- A supported camera running the **exact Canon firmware** listed above.
+- A **fully charged battery**, a computer and an SD card reader.
+- An **empty or spare SD card**. A 32 GB or smaller card is a simple choice for first-time Magic Lantern setup. Copy any photos off it first: formatting erases them.
 
-**Linux example** for a 600D card already mounted under `/run/media/$USER/EOS_DIGITAL`. Check the path before running any command.
+### Steps
 
-```bash
-CARD="/run/media/$USER/EOS_DIGITAL"
-test -f "$CARD/autoexec.bin" || { echo "Wrong card or mount point"; exit 1; }
-test -d "$CARD/ML/modules" || { echo "Magic Lantern missing"; exit 1; }
+1. **Check your camera model and firmware.** Use the Canon menu and the [table above](#supported-cameras-and-downloads). Stop if they do not match.
+2. **Prepare the spare card.** Insert it into the camera and format it using the camera's **Format card** option. Do not format a card that holds photos or a working Magic Lantern installation you want to keep.
+3. **Download the full ZIP** for your exact camera from the **Fresh installation** column. Its filename starts with `magiclantern-astro-`. You do not need the module-only ZIP as well.
+4. **Copy the files to the card.** Turn the camera off, move the card to your computer, open the downloaded ZIP, and copy **everything inside** to the top level of the card. The card should show `autoexec.bin`, `ML-SETUP.FIR` and an `ML` folder side by side. Do not copy the ZIP itself or put its contents in an extra folder.
+5. **Safely eject the card**, insert it into the camera and set the mode dial to **M** (Manual).
+6. **Run the Magic Lantern first-time installer.** In the Canon menu, open **Firmware Ver. → Firmware update** (the wording varies by camera). Follow the installer prompts on the camera screen. This step enables the camera to boot Magic Lantern from a prepared card. **Do not turn the camera off or remove the battery while it runs.** Wait for its success message.
+7. **Restart the camera** as the installer instructs. Press the **Trash/Delete** button to open Magic Lantern. Go to **Focus → Midnight**.
+8. **If Midnight is missing**, open Magic Lantern's **Modules** tab, enable `astro` and restart.
 
-# Save the old module, data, and settings on your computer.
-tar -C "$CARD" -czf "$HOME/midnight-card-backup.tar.gz" ML autoexec.bin
+Then [check that Midnight works](#check-that-midnight-works).
 
-# Extract the matching module-only ZIP. Do NOT use the full firmware ZIP here.
-unzip -o "$HOME/Downloads/midnight-module-600D.102.zip" -d "$CARD"
-sync
-# Safely unmount the card using your file manager or udisksctl.
-```
+**Important:** Copying the full ZIP alone does **not** complete first-time Magic Lantern setup. If you cannot find `ML-SETUP.FIR`, the firmware-update option does not work, or the installer does not report success, **stop** and consult the [Magic Lantern first-time installation guide](https://wiki.magiclantern.fm/install). Do not try another camera's firmware files.
 
-This example does not format the card or alter the boot sector. If you use the file manager instead, copying the ZIP contents to the **card root** is enough.
+## B. Magic Lantern already installed: add Midnight
 
-## 3. First camera tests
+Use this path if the camera **already starts Magic Lantern successfully**. It is also the path for updating Midnight.
 
-1. Open **Midnight → Developer → Solve image file**. The supplied `TEST.PGM` should produce an annotated sky result. This tests the solver and catalogue without requiring the night sky.
-2. View an ordinary photo in Canon's full-screen **Play** mode. Press **Q**, then **SET**. Midnight should show progress and then annotate matched stars, RA/Dec, and deep-sky objects directly over the displayed photo. Press **Q** to hide them. The original JPG/CR2 is unchanged.
-3. Enable **1× photo Live View** and choose **Solve Live View (3s)**. That action waits three seconds for tripod vibration to settle. It does *not* take an exposure. At 5×/10× zoom, Midnight should explicitly ask for **1×** instead.
-4. To choose a target, open **Midnight → Target → Catalogue / Number**. The initial target is **M42**. Use **Mark target** to enable or disable its on-screen arrow/outline.
+### What you need
 
-If a solve fails, check **Midnight → Last solve → Status**. For a gallery failure, Midnight should also show a visible error until Q dismisses it.
+- A working Magic Lantern SD card and a camera with the **matching model and Canon firmware** from the [table above](#supported-cameras-and-downloads).
+- A computer and an SD card reader to back up and copy the files.
 
-**Physical-camera status:** The compiled 600D module has run successfully in QEMU and has been used on a physical 600D, but all camera and lens combinations are not verified. Physical lens autofocus and mount polar alignment are experimental.
+### Steps
 
-## 4. Troubleshooting
+1. **Turn the camera off** and wait until the card activity light goes out. Remove the SD card.
+2. **Back up the card** to your computer, including the `ML` folder, `autoexec.bin` and any photos you want to keep.
+3. **Download the module-only ZIP** from the **Existing Magic Lantern** column. Its filename starts with `midnight-module-`. **Do not download the full ZIP for this path.**
+4. **Copy the ZIP contents to the card.** Open the ZIP and extract everything to the **top level of the SD card**. If asked, replace the existing Midnight module and sky catalogue files. Keep all other Magic Lantern files, including your original `autoexec.bin`.
+5. **Safely eject the card**, put it back in the camera and turn the camera on.
+6. Press **Trash/Delete → Focus → Midnight**. If it is missing, enable `astro` in Magic Lantern's **Modules** tab and restart.
 
-| Symptom | Action |
+Then [check that Midnight works](#check-that-midnight-works).
+
+This update does **not** change Canon firmware, Magic Lantern boot files or the card's boot settings.
+
+## Check that Midnight works
+
+1. **Open the Midnight menu:** press **Trash/Delete → Focus → Midnight**.
+2. **Test the sky solver without taking a photo:** open **Developer → Solve image file**, with `TEST.PGM` selected. It should display an annotated sky result. This checks the installed module and sky files.
+3. **Test an existing photo:** display a photo full-screen using Canon's **Play** button. Press **Q**, then **SET** to ask Midnight to solve it. On the **EOS 100D**, press **Av / exposure compensation**, then **SET** instead. A suitable star-field photo should show sky coordinates and labels. The original photograph is not changed.
+4. **Test Live View:** in **photo mode**, use **1× Live View**, then select **Solve Live View (3s)**. The three-second delay is for stabilization, not an exposure. The solver cannot use 5× or 10× Live View.
+5. **Choose a target only if you want guidance:** Midnight starts with **Target → None**. Select a catalogue and object number to show a marker or arrow. Set it back to **None** to clear it.
+
+If a solve fails, open **Last solve → Status** to see the reason. A first-time failure on a new camera model is useful hardware-test feedback, not proof that the installation itself failed.
+
+## Troubleshooting
+
+| Problem | What to do |
 | --- | --- |
-| Midnight does not appear | Enable `astro` in Magic Lantern **Modules**, then restart. Check `ML/modules/astro.mo` exists. |
-| `Use 1x Live View` | Leave 5×/10× zoom and use photo-mode 1× Live View. |
-| `SKY index missing/corrupt` | Extract the complete module-only ZIP again, including all `ML/ASTRO/SKY.*` files. Do not mix databases from different releases. |
-| Gallery Q/SET displays no result | Use the camera's ordinary full-screen Play view. Check **Last solve → Status**. Record which error appears. |
-| Memory or module load error | Disable unnecessary ML modules and reboot. Keep your backed-up working version available. |
-| Reader repeatedly disconnects or files vanish | Stop using that USB connection. Change reader/port and check the filesystem before writing. |
+| Magic Lantern does not start after a fresh installation | Check that the first-time installer **finished successfully**, the firmware matches, and `autoexec.bin` and `ML` are at the card's top level. See the [official installation guide](https://wiki.magiclantern.fm/install). |
+| Camera hangs or screen stays black | Turn it off. If needed, remove the battery, then **remove the SD card** and restart without it. Do not keep retrying a mismatched build. |
+| Midnight is not in **Focus** | Open Magic Lantern **Modules**, enable `astro`, restart, and check `ML/modules/astro.mo` exists on the card. |
+| `SKY index missing/corrupt` | Extract the complete ZIP for your camera again. Keep all `ML/ASTRO` files from the same Midnight release. |
+| `Use 1x Live View` | Turn off 5×/10× zoom and use **1× photo Live View**. |
+| Gallery shortcut shows no result | Use full-screen **Play**. On 100D, use **Av → SET**. Check **Last solve → Status**. |
+| Module or memory error | Disable other Magic Lantern modules and restart. New camera ports may lack enough free memory. |
+| SD card reader disconnects or files disappear | Stop writing. Try a different reader or port and check the card for errors first. |
 
-## 5. Roll back
+## Restore your previous setup
 
-1. Power off the camera and remove the card.
-2. Restore the backed-up `ML/modules/astro.mo` and the entire `ML/ASTRO/` folder. If needed, restore your backed-up `ML/SETTINGS/` files.
-3. Safely eject, reinsert, and reboot.
+**After a module-only update:**
 
-For a **module-only** upgrade, restoring the old `autoexec.bin` is normally unnecessary because the update never replaced it.
+1. Turn off the camera and remove the card.
+2. Copy your backed-up `ML/modules/astro.mo` and the full `ML/ASTRO` folder back onto the card. Restore `ML/SETTINGS` if needed.
+3. Safely eject the card and restart the camera. You do not normally need to change `autoexec.bin`.
 
-## 6. Fresh card / first Magic Lantern installation
+**After a fresh installation:** use your original spare/backup card to return to a known working setup. To remove Magic Lantern's **camera boot setting**, use the official [Magic Lantern uninstall instructions](https://wiki.magiclantern.fm/install). **Deleting files alone is not the same as running the uninstall procedure.**
 
-Use a **spare SD card** and follow the [Magic Lantern installation guide](https://wiki.magiclantern.fm/install) for your camera and firmware. Make sure Magic Lantern boots correctly **before** adding Midnight. A ZIP containing `autoexec.bin` is not by itself sufficient to prepare an SD card for booting. Do not format an existing working card merely to add Midnight.
+## Optional files and model-specific notes
 
-**Source:** [Midnight](https://github.com/mistrjirka/midnight). The modular C implementation incorporates architectural improvements from [Jakub's AstroML](https://github.com/kubakubakuba/AstroML), with the previous Midnight solver retained for regression tests.
+- [Wide-field sky index](https://github.com/mistrjirka/midnight/releases/download/v0.5.0-alpha.1/magiclantern-astro-wide-index.zip): extra sky data for fields wider than about **60°**. Most telescope users do not need it. Extract it to the card root if needed.
+- [100D, 650D, 60D, 1100D and 70D testing notes](EASY_CAMERA_PORTS.md)
+- [550D testing notes](550D_PORT.md) and [700D testing notes](700D_PORT.md)
+
+Midnight is based in part on [AstroML](https://github.com/kubakubakuba/AstroML).

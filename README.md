@@ -33,9 +33,14 @@ Its bundled synthetic sky solved with **11 matches in 0.19 s of emulator-reporte
 
 ## Installation
 
-**Recommended:** update an existing compatible Magic Lantern card using the module-only ZIP. Back up the card, then extract the ZIP to the card root. Do not overwrite `autoexec.bin` when updating an existing Magic Lantern installation.
+**Choose the installation path for your camera:**
 
-See the [installation guide](docs/INSTALL.md), [new-camera test guide](docs/EASY_CAMERA_PORTS.md) and model-specific [550D](docs/550D_PORT.md) / [700D](docs/700D_PORT.md) notes. New ports need physical-camera validation.
+1. **[Fresh camera, without Magic Lantern](docs/INSTALL.md#a-fresh-camera-install-magic-lantern-and-midnight):** prepare a spare SD card, copy the matching **full ZIP**, and run the first-time Magic Lantern installer in the camera.
+2. **[Magic Lantern already installed](docs/INSTALL.md#b-magic-lantern-already-installed-add-midnight):** back up your card and copy the matching **module-only ZIP**. Keep your existing Magic Lantern boot files.
+
+[Check supported models, exact Canon firmware versions and download links](docs/INSTALL.md#supported-cameras-and-downloads). Both paths include step-by-step instructions and share [verification, troubleshooting and recovery](docs/INSTALL.md#check-that-midnight-works).
+
+New camera ports are experimental and need on-camera validation. Do not use a full ZIP to update an existing working Magic Lantern card.
 
 ## Source
 
