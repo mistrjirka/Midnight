@@ -54,6 +54,6 @@ Build and run tests:
 
     PYTHON=python3 RUN_SLOW_TESTS=1 bash scripts/build.sh
 
-[Migration status](docs/MODULAR_MIGRATION.md) · [C code review](docs/C_CODE_REVIEW.md)
+[Migration status](docs/MODULAR_MIGRATION.md) · [C code review](docs/C_CODE_REVIEW.md) · [Cancellation design](docs/CANCELLATION.md)
 
 **Safety:** The newly added camera ports are compile-tested, not hardware-tested. Gallery solving, Live View, available RAM and lens motors require on-camera checks. Back up the card. Use module-only updates on existing compatible Magic Lantern installations.
