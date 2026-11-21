@@ -91,3 +91,29 @@ after a long move. Each pair of corrections is followed by another photo.
 physical setup condition, not proof that a particular GoTo path will avoid
 a tripod, cables, horizon or hard stop. Hardware safeguards must be
 installed before enabling automatic movement.
+
+
+## Camera roll and small attachment offsets
+
+The solver does not require the Canon to be level or aligned with a motor
+axis. Its four-star patterns are invariant to sensor rotation and image scale.
+The verified camera transform estimates the field rotation. Each new saved
+still image is solved independently.
+
+A fixed mounting offset between the camera optical axis and the motor's
+mechanical axis does not need an angle entered by the user. The controller
+learns actual sky displacement from measured pulses and re-solves after
+each pair, rather than assuming a square motor mounting geometry.
+
+Validation: tests/test_camera_roll_offsets.py solves 36 synthetic full
+camera images across three star fields with roll angles from -179 to +179
+degrees and center offsets of +/-0.18 degrees. All 36 passed with center
+error under 0.1 degree. This test used a Canon 600D-sized 22.3 mm sensor.
+Additional randomized GoTo tests cover 240 starting RA/Dec positions and
+skewed or reversed motor directions.
+
+Limits: severe optical distortion, star-poor images, changing mechanical
+flexure, inaccurate sky-drift estimates, and real-world axis constraints
+can still cause measurement or movement failures. The system has no
+horizon, cable-collision, or hard-stop detection. Physical USB and motor
+GoTo remain unverified and automatic movement is disabled.
