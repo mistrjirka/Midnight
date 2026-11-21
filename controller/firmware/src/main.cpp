@@ -262,7 +262,7 @@ static void startTelemetryServer() {
       response+=",\"source\":"+String(cp.source);
       response+=",\"sequence\":"+String(cp.sequence);
       response+=",\"age_ms\":"+String(age+cp.ageAtReadMs);
-      response+=",\"live_and_fresh\":"+String(usableLivePointing(cp) && age+cp.ageAtReadMs<10000?"true":"false");
+      response+=",\"live_and_fresh\":"+String(usableLivePointing(cp) && age+cp.ageAtReadMs<(cp.source==5?45000u:10000u)?"true":"false");
     }
     telemetryServer.send(200,"application/json",response+"}");
   });

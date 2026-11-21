@@ -6,6 +6,7 @@
 #include "star_focus.h"
 #include "guide.h"
 #include "location.h"
+#include "mount_control.h"
 #include "overlay.h"
 #include "playback.h"
 #include "polar.h"
@@ -141,6 +142,12 @@ static void run(astro_action action)
             break;
         case ASTRO_ACTION_READ_LOCATION:
             astro_location_read_last_photo();
+            break;
+        case ASTRO_ACTION_MOUNT_SYNC:
+            astro_mount_sync_photo();
+            break;
+        case ASTRO_ACTION_MOUNT_MEASURE:
+            astro_mount_measure_photo();
             break;
         default:
             break;

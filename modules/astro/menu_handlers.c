@@ -10,6 +10,7 @@
 #include "core/wcs.h"
 #include "gain.h"
 #include "location.h"
+#include "mount_control.h"
 #include "menu.h"
 #include "menu_handlers.h"
 #include "overlay.h"
@@ -109,6 +110,45 @@ MENU_SELECT_FUNC(astro_menu_start_measure)
 MENU_SELECT_FUNC(astro_menu_start_read_location)
 {
     start(ASTRO_ACTION_READ_LOCATION, 0);
+}
+
+MENU_SELECT_FUNC(astro_menu_mount_sync)
+{
+    start(ASTRO_ACTION_MOUNT_SYNC, 1);
+}
+
+MENU_SELECT_FUNC(astro_menu_mount_measure)
+{
+    start(ASTRO_ACTION_MOUNT_MEASURE, 1);
+}
+
+MENU_SELECT_FUNC(astro_menu_mount_goto)
+{
+    astro_mount_goto_unavailable();
+}
+
+MENU_UPDATE_FUNC(astro_menu_mount_status)
+{
+    char value[54];
+    astro_mount_status_menu(value,sizeof(value));
+    MENU_SET_VALUE("%s",value);
+}
+
+MENU_UPDATE_FUNC(astro_menu_mount_delta)
+{
+    char value[54];
+    astro_mount_delta_menu(value,sizeof(value));
+    MENU_SET_VALUE("%s",value);
+}
+
+MENU_UPDATE_FUNC(astro_menu_mount_exposure_update)
+{
+    MENU_SET_VALUE("%d s",astro_cfg_mount_exposure_sec);
+}
+
+MENU_UPDATE_FUNC(astro_menu_mount_goto_update)
+{
+    MENU_SET_VALUE("Not ready");
 }
 
 #define STATUS_MENU_BYTES 25 /* fits beside "Solve Live View (3s)" */

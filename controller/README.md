@@ -61,3 +61,8 @@ connection and powered VBUS wiring for the Canon.
 ## Camera telemetry protocol
 
 Midnight's camera module publishes only independently verified plate solutions. A USB PTP vendor operation reads a versioned snapshot containing RA, Dec, field of view, matched-star count and solution age. Do not treat a test/gallery frame as live pointing. See `docs/CONTROLLER_PTP.md`.
+
+The camera module also accepts solved normal still-photo measurements as
+telemetry source 5. The ESP32 rejects source 2 (gallery) and source 3 (test)
+for any future motion, and uses strict age checks for still measurements.
+Automatic GoTo and secondary-axis control remain disabled.

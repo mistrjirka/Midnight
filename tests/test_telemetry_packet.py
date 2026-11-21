@@ -39,4 +39,6 @@ with tempfile.TemporaryDirectory(prefix="midnight-telem-") as tmp:
     assert get() == a  # bad or insufficient matches cannot alter telemetry
     api.astro_telemetry_publish(95, 42, 900000, 25, 18, 4)
     assert get()[1:9] == (2, 95, 42, 900000, 25, 18, 4, 1)
+    api.astro_telemetry_publish(112, 1234567, -500, 200, 16, 5)
+    assert get()[1:9] == (3, 112, 1234567, -500, 200, 16, 5, 1)
     print("PASS: 32-byte packet, signed Dec, validity, sequence and rejection")

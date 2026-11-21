@@ -24,12 +24,16 @@ bool parseCameraPointing(const uint8_t *p, size_t n, CameraPointing &out) {
         next.dec < -900000 || next.dec > 900000 ||
         next.fovCdeg==0 || next.fovCdeg>18000 ||
         next.matches<8 || next.matches>96 ||
-        next.source<1 || next.source>4)) return false;
+        next.source<1 || next.source>5)) return false;
     if (!next.valid && (next.sequence!=0 || next.matches!=0 ||
         next.source!=0)) return false;
     out=next;
     return true;
 }
 bool usableLivePointing(const CameraPointing &p) {
-    return p.valid && (p.source==1 || p.source==4) && p.matches>=8 && p.ageAtReadMs<10000;
+    /* Normal still-photo solves may need longer card I/O and star matching.
+     * Reject stale data after 45s. Live View remains limited to 10s. */
+    const uint32_t limit=p.source==5 ? 45000 : 10000;
+    return p.valid && (p.source==1 || p.source==4 || p.source==5) &&
+           p.matches>=8 && p.ageAtReadMs<limit;
 }

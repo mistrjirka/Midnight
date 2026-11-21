@@ -9,5 +9,5 @@ struct CameraPointing {
     bool valid;
 };
 bool parseCameraPointing(const uint8_t *payload, size_t size, CameraPointing &out);
-/* The controller must not use a gallery or synthetic solution for closed-loop movement. */
+/* Only camera-generated live, guide, or fresh saved-photo solves; never gallery/test. */
 bool usableLivePointing(const CameraPointing &p);

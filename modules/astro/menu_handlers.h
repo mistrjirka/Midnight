@@ -17,6 +17,13 @@ MENU_SELECT_FUNC(astro_menu_start_polar_adjust);
 MENU_SELECT_FUNC(astro_menu_start_autofocus);
 MENU_SELECT_FUNC(astro_menu_start_measure);
 MENU_SELECT_FUNC(astro_menu_start_read_location);
+MENU_SELECT_FUNC(astro_menu_mount_sync);
+MENU_SELECT_FUNC(astro_menu_mount_measure);
+MENU_SELECT_FUNC(astro_menu_mount_goto);
+MENU_UPDATE_FUNC(astro_menu_mount_status);
+MENU_UPDATE_FUNC(astro_menu_mount_delta);
+MENU_UPDATE_FUNC(astro_menu_mount_goto_update);
+MENU_UPDATE_FUNC(astro_menu_mount_exposure_update);
 
 MENU_UPDATE_FUNC(astro_menu_status_update);
 MENU_UPDATE_FUNC(astro_menu_target_number_update);

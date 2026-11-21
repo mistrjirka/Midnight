@@ -8,6 +8,7 @@
 #define ASTRO_SOURCE_GALLERY 2
 #define ASTRO_SOURCE_TEST 3
 #define ASTRO_SOURCE_GUIDE 4
+#define ASTRO_SOURCE_STILL 5 /* Canon still exposure, verified solved saved preview */
 /* RA and Dec in 1e-4 degrees; FOV in centidegrees. Validated plate solves only. */
 void astro_telemetry_publish(uint32_t uptime_ms, uint32_t ra, int32_t dec,
                              uint16_t fov_cdeg, uint16_t matches, uint8_t source);

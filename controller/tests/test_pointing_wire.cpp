@@ -18,6 +18,7 @@ int main(){
     frame[24]=2;assert(parseCameraPointing(frame,32,result));assert(!usableLivePointing(result));
     frame[24]=3;assert(parseCameraPointing(frame,32,result));assert(!usableLivePointing(result));
     frame[24]=4;assert(parseCameraPointing(frame,32,result));assert(usableLivePointing(result));
+    frame[24]=5;assert(parseCameraPointing(frame,32,result));assert(usableLivePointing(result));
     frame[25]=2;assert(!parseCameraPointing(frame,32,result));
     frame[25]=1;put32(frame+12,4000000);assert(!parseCameraPointing(frame,32,result));
     put32(frame+12,1234567);frame[26]=1;assert(!parseCameraPointing(frame,32,result));

@@ -25,6 +25,7 @@ CONFIG_INT("astro.scanradius", astro_cfg_focus_radius, 3);
 CONFIG_INT("astro.shortcut", astro_cfg_focus_shortcut, ASTRO_SHORTCUT_LIGHT);
 CONFIG_INT("astro.overlay", astro_cfg_focus_readout, 0);
 CONFIG_INT("astro.test_image", astro_cfg_test_image, 0);
+CONFIG_INT("astro.mount_exposure", astro_cfg_mount_exposure_sec, 2);
 CONFIG_INT("astro.loc_valid", astro_cfg_location_valid, 0);
 CONFIG_INT("astro.loc_lat", astro_cfg_latitude, 0);
 CONFIG_INT("astro.loc_lon", astro_cfg_longitude, 0);
@@ -48,6 +49,7 @@ MODULE_CONFIG(astro_cfg_focus_radius)
 MODULE_CONFIG(astro_cfg_focus_shortcut)
 MODULE_CONFIG(astro_cfg_focus_readout)
 MODULE_CONFIG(astro_cfg_test_image)
+MODULE_CONFIG(astro_cfg_mount_exposure_sec)
 MODULE_CONFIG(astro_cfg_location_valid)
 MODULE_CONFIG(astro_cfg_latitude)
 MODULE_CONFIG(astro_cfg_longitude)

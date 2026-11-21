@@ -20,7 +20,7 @@ void astro_telemetry_publish(uint32_t uptime_ms, uint32_t ra, int32_t dec,
 {
     if(ra>=3600000U || dec < -900000 || dec > 900000 ||
        fov_cdeg==0 || fov_cdeg>18000 ||
-       matches<8 || matches>96 || source<1 || source>4)return;
+       matches<8 || matches>96 || source<1 || source>5)return;
     revision++; /* odd while a writer updates */
     last.sequence++;
     last.uptime_ms=uptime_ms;

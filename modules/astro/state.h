@@ -38,6 +38,7 @@ extern int astro_cfg_focus_radius;
 extern int astro_cfg_focus_shortcut;
 extern int astro_cfg_focus_readout;
 extern int astro_cfg_test_image;
+extern int astro_cfg_mount_exposure_sec; /* normal still exposure: 1 or 2 seconds */
 extern int astro_cfg_location_valid;
 extern int astro_cfg_latitude;        /* 1e-4 degree */
 extern int astro_cfg_longitude;       /* 1e-4 degree */
