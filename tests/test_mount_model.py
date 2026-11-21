@@ -39,11 +39,31 @@ int main(void){
  int32_t old=m.axis[0].east_q16;
  assert(!mount_calibrate(&m,0,+1,500,ra,ra));
  assert(m.axis[0].east_q16==old);
+ /* Full-sky bearings: the camera may point anywhere before a blind solve.
+  * A target across RA=0 and a target 100 degrees away must remain valid. */
+ uint32_t angular=0;
+ assert(mount_target_bearing(p(3590000,350000),p(10000,350000),
+                             &ex,&ey,&angular));
+ assert(ex>0 && angular>10000 && angular<20000);
+ assert(mount_target_bearing(p(800000,350000),p(1800000,500000),
+                             &ex,&ey,&angular));
+ assert(angular>500000 && angular<1200000);
+ assert(ex!=0 || ey!=0);
+ /* Exactly antipodal means the bearing is ambiguous: abort safely. */
+ assert(!mount_target_bearing(p(0,0),p(1800000,0),&ex,&ey,&angular));
+ /* Arbitrary axis polarity is learned from measured movement. */
+ mount_reset(&m);
+ assert(mount_sync(&m,start));
+ assert(mount_calibrate_vector(&m,0,+1,500,-1300,-300,ra));
+ assert(m.axis[0].east_q16<0 && m.axis[0].north_q16<0);
+ assert(mount_calibrate_vector(&m,0,-1,500,+1300,+300,ra));
+ assert(m.axis[0].samples==2);
  /* Nearly parallel axes: refuse movement. */
  m.axis[1]=m.axis[0];
  assert(mount_plan(&m,target,&cmd)==MOUNT_PLAN_ERROR);
  /* A near-parallel second axis still fails if first axis points east.
   * det/(a*d) alone would incorrectly accept it. */
+ m.axis[0].north_q16=0;
  m.axis[1].east_q16=m.axis[0].east_q16;
  m.axis[1].north_q16=m.axis[0].east_q16/10000;
  assert(mount_plan(&m,target,&cmd)==MOUNT_PLAN_ERROR);

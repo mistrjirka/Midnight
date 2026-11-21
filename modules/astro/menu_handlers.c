@@ -164,6 +164,13 @@ MENU_UPDATE_FUNC(astro_menu_mount_exposure_update)
     MENU_SET_VALUE("%d s",astro_cfg_mount_exposure_sec);
 }
 
+MENU_UPDATE_FUNC(astro_menu_mount_controller_update)
+{
+    char value[32];
+    astro_mount_controller_menu(value,sizeof(value));
+    MENU_SET_VALUE("%s",value);
+}
+
 MENU_UPDATE_FUNC(astro_menu_mount_goto_update)
 {
     MENU_SET_VALUE("Send");

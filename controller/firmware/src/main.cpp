@@ -8,6 +8,10 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include "camera_ptp_host.h"
+#include "axis2_hbridge.h"
+#if defined(MIDNIGHT_HIL_SIMULATION)
+#include "goto_hil.h"
+#endif
 #include <cstring>
 #include <cstdlib>
 
@@ -27,6 +31,7 @@ String joinedSsid;
 uint32_t reconnectAt = 0, stopAt = 0;
 bool needStop = false;
 uint32_t lastCameraStopCommand = 0;
+bool lastWifiConnected = false;
 char line[192];
 size_t lineSize = 0;
 
@@ -136,10 +141,133 @@ bool integer(const char *s, long minimum, long maximum, long *out) {
   *out = value;
   return true;
 }
+#if defined(MIDNIGHT_HIL_SIMULATION)
+static GoToHil simulation;
+static int hexDigit(char c){
+    if(c>='0' && c<='9')return c-'0';
+    if(c>='a' && c<='f')return c-'a'+10;
+    if(c>='A' && c<='F')return c-'A'+10;
+    return -1;
+}
+static bool parseHex32(const char *hex,uint8_t packet[32]){
+    if(!hex || strlen(hex)!=64)return false;
+    for(int i=0;i<32;i++){
+        const int hi=hexDigit(hex[2*i]),lo=hexDigit(hex[2*i+1]);
+        if(hi<0 || lo<0)return false;
+        packet[i]=(uint8_t)(hi*16+lo);
+    }
+    return true;
+}
+static void printSimStatus(){
+    const GoToLoop &loop=simulation.loop();
+    Serial.printf("SIM STATUS phase=%s stage=%u error_e4=%lu corrections=%lu "
+                  "ra=%lu dec=%ld drift_e_q16=%ld drift_n_q16=%ld "
+                  "drift_valid=%u calibrated=%u fault=%u now=%lu\n",
+         loop.status(true),(unsigned)loop.stage(),
+         (unsigned long)loop.errorE4(),(unsigned long)loop.steps(),
+         (unsigned long)loop.lastRa(),(long)loop.lastDec(),
+         (long)loop.driftEastQ16(),(long)loop.driftNorthQ16(),
+         loop.driftMeasured()?1u:0u,loop.calibrated()?1u:0u,
+         (unsigned)loop.failure(),(unsigned long)simulation.clock());
+}
+static void handleSim(char *save){
+    const char *sub=strtok_r(nullptr," \t",&save);
+    if(!sub){Serial.println("SIM ERR COMMAND_REQUIRED");return;}
+    if(!strcmp(sub,"RESET")){
+        simulation.reset();
+        Serial.println("SIM OK RESET");
+    }else if(!strcmp(sub,"STATUS")){
+        printSimStatus();
+    }else if(!strcmp(sub,"MAILBOX")){
+        uint8_t data[32]={};
+        const char *hex=strtok_r(nullptr," \t",&save);
+        if(!parseHex32(hex,data)){Serial.println("SIM ERR INVALID_MNC1_HEX");return;}
+        if(simulation.mailbox(data)){
+            Serial.println("SIM OK MAILBOX");
+            printSimStatus();
+        }else{
+            Serial.printf("SIM ERR %s\n",simulation.lastError());
+        }
+    }else if(!strcmp(sub,"POINT")){
+        const char *idStr=strtok_r(nullptr," \t",&save);
+        const char *hex=strtok_r(nullptr," \t",&save);
+        uint8_t data[32]={};
+        long id=0;
+        if(!integer(idStr,1,2147483647L,&id) || !parseHex32(hex,data)){
+            Serial.println("SIM ERR INVALID_MNT1");
+            return;
+        }
+        if(simulation.pointing((uint32_t)id,data)){
+            Serial.println("SIM OK POINT");
+            printSimStatus();
+        }else{
+            Serial.printf("SIM ERR %s\n",simulation.lastError());
+        }
+    }else if(!strcmp(sub,"NEXT")){
+        const HilAction action=simulation.next();
+        if(action.type==HilActionType::CAMERA_SHOT){
+            Serial.printf("SIM PHOTO id=%lu\n",(unsigned long)action.requestId);
+        }else if(action.type==HilActionType::RA_SLEW ||
+                 action.type==HilActionType::AXIS2_SLEW){
+            if(action.motor.axis==0){
+                const int ogDirection=action.motor.direction>0?0:1;
+                Serial.printf("SIM MOTOR axis=0 direction=%d duration_ms=%lu "
+                              "dryrun_http=/startslew?speed=400&direction=%d "
+                              "dryrun_stop=/stopslew\n",
+                              action.motor.direction,
+                              (unsigned long)action.motor.duration_ms,ogDirection);
+            }else{
+                Serial.printf("SIM MOTOR axis=1 direction=%d duration_ms=%lu "
+                              "in1=%d in2=%d stop_in1=0 stop_in2=0\n",
+                              action.motor.direction,
+                              (unsigned long)action.motor.duration_ms,
+                              action.motor.direction>0?1:0,
+                              action.motor.direction<0?1:0);
+            }
+        }else{
+            Serial.printf("SIM IDLE phase=%s\n",
+                          simulation.loop().status(true));
+        }
+    }else if(!strcmp(sub,"TIME")){
+        const char *arg=strtok_r(nullptr," \t",&save);
+        long ms=0;
+        if(!integer(arg,0,1200000,&ms)){
+            Serial.println("SIM ERR INVALID_TIME");
+            return;
+        }
+        simulation.advance((uint32_t)ms);
+        Serial.printf("SIM TIME now=%lu\n",(unsigned long)simulation.clock());
+    }else if(!strcmp(sub,"ACK")){
+        const bool ok=simulation.stopAck(true);
+        Serial.println(ok?"SIM OK STOP_CONFIRMED":"SIM ERR NO_MOTOR_ACTIVE");
+    }else if(!strcmp(sub,"ACKFAIL")){
+        simulation.stopAck(false);
+        Serial.println("SIM ERR MOTOR_STOP_FAILED");
+    }else if(!strcmp(sub,"CANCEL")){
+        simulation.cancel();
+        Serial.println("SIM OK CANCEL");
+    }else{
+        Serial.println("SIM ERR UNKNOWN");
+    }
+}
+#endif
+
 void handleLine(char *command) {
   char *save = nullptr;
   char *cmd = strtok_r(command, " \t", &save);
   if (!cmd) return;
+#if defined(MIDNIGHT_HIL_SIMULATION)
+  // This firmware intentionally cannot issue any real motor commands.
+  if(!strcmp(cmd,"TRACK") || !strcmp(cmd,"SLEW") ||
+     !strcmp(cmd,"STOP") || !strcmp(cmd,"AXIS2")){
+      Serial.println("ERR HIL_MOTORS_HARD_LOCKED");
+      return;
+  }
+  if(!strcmp(cmd,"SIM")){
+      handleSim(save);
+      return;
+  }
+#endif
   if (!strcmp(cmd, "PING")) Serial.println("OK MIDNIGHT_BRIDGE_V1");
   else if (!strcmp(cmd, "HELP")) Serial.println(
     "COMMANDS: PING WIFI SCAN HOST STATUS|LOG CAMERA STATUS|MEASURE|TARGET "
@@ -183,6 +311,16 @@ void handleLine(char *command) {
                     cameraHostNavigationStatus(view.navigation),
                     cameraHostPhotoStatus(view.photoState),
                     (unsigned long)view.lastRequestId);
+      Serial.printf("GOTO phase=%s stage=%u error_e4=%lu corrections=%lu "
+                    "fault=%s motor_ready=%u pulse_axis=%d pulse_dir=%d pulse_ms=%lu\n",
+                    cameraHostLoopStatus(view.loopPhase,view.autoMotorReady),
+                    (unsigned)view.loopStage,(unsigned long)view.loopErrorE4,
+                    (unsigned long)view.loopCorrections,
+                    cameraHostLoopFault(view.loopFault),
+                    view.autoMotorReady?1u:0u,
+                    view.nextPulseValid?view.nextPulse.axis:-1,
+                    view.nextPulseValid?view.nextPulse.direction:0,
+                    (unsigned long)(view.nextPulseValid?view.nextPulse.duration_ms:0));
       if(view.mailboxValid){
         Serial.printf("CAMERA target_seq=%lu command=%u target=%lu,%ld "
                       "requested=%lu completed=%lu capture_state=%u point_seq=%lu\n",
@@ -195,6 +333,29 @@ void handleLine(char *command) {
                       (unsigned long)view.mailbox.pointSequence);
       }
     }else Serial.println("ERR CAMERA_USE_STATUS_TARGET_OR_MEASURE");
+  }
+  else if (!strcmp(cmd,"AXIS2")){
+    const char *action=strtok_r(nullptr," \t",&save);
+    if(action && !strcmp(action,"STATUS")){
+        Serial.printf("AXIS2 configured=%u moving=%u\n",
+                      axis2HBridgeConfigured()?1u:0u,
+                      axis2HBridgeMoving()?1u:0u);
+    }else if(action && !strcmp(action,"STOP")){
+        axis2HBridgeStop();
+        Serial.println("OK AXIS2_OUTPUTS_LOW");
+    }else if(action && !strcmp(action,"PULSE")){
+        long direction,ms;
+        if(!integer(strtok_r(nullptr," \t",&save),-1,1,&direction) ||
+           direction==0 ||
+           !integer(strtok_r(nullptr," \t",&save),50,1000,&ms)){
+            Serial.println("ERR AXIS2_ARGUMENTS");
+        }else if(!axis2HBridgeConfigured()){
+            Serial.println("ERR AXIS2_UNCONFIGURED");
+        }else if(axis2HBridgePulse((int)direction,(uint32_t)ms)){
+            Serial.printf("OK AXIS2_PULSE dir=%ld ms=%ld local_watchdog=on\n",
+                          direction,ms);
+        }else Serial.println("ERR AXIS2_BUSY_OR_ESTOP");
+    }else Serial.println("ERR AXIS2_USE_STATUS_STOP_OR_PULSE");
   }
   else if (!strcmp(cmd, "WIFI")) {
     Serial.printf("WIFI %s SSID %s\n", wifiReady() ? "READY" : "DISCONNECTED",
@@ -263,6 +424,7 @@ void handleLine(char *command) {
     }
   }
   else if (!strcmp(cmd, "STOP")) {
+    cameraHostCancelGoTo();
     needStop = true;
     stopAt = 0;
     stopSlew();
@@ -271,6 +433,12 @@ void handleLine(char *command) {
 static void startTelemetryServer() {
   telemetryServer.on("/diagnostics",HTTP_GET,[](){
     telemetryServer.send(200,"text/plain",cameraHostDiagnostics());
+  });
+  telemetryServer.on("/goto/stop",HTTP_POST,[](){
+    cameraHostCancelGoTo();
+    needStop=true;stopAt=0;
+    telemetryServer.send(202,"application/json",
+      "{\"accepted\":true,\"navigation\":\"STOP_REQUESTED\"}");
   });
   telemetryServer.on("/mount",HTTP_GET,[](){
     CameraMountView view={};
@@ -286,6 +454,19 @@ static void startTelemetryServer() {
       +",\"last_photo_ra_e4\":"+String(view.lastPhotoRa)
       +",\"last_photo_dec_e4\":"+String(view.lastPhotoDec)
       +",\"motor_control_enabled\":false}";
+    response.remove(response.length()-1); // replace closing brace with details
+    response+=",\"goto_phase\":\"";
+    response+=cameraHostLoopStatus(view.loopPhase,view.autoMotorReady);
+    response+="\",\"goto_stage\":"+String((unsigned)view.loopStage);
+    response+=",\"goto_fault\":\"";
+    response+=cameraHostLoopFault(view.loopFault);
+    response+="\",\"error_e4\":"+String(view.loopErrorE4);
+    response+=",\"corrections\":"+String(view.loopCorrections);
+    response+=",\"next_pulse_axis\":"+String(view.nextPulseValid?view.nextPulse.axis:-1);
+    response+=",\"next_pulse_direction\":"+String(view.nextPulseValid?view.nextPulse.direction:0);
+    response+=",\"next_pulse_ms\":"+String(view.nextPulseValid?view.nextPulse.duration_ms:0);
+    response+=",\"motor_ready\":"+
+      String(view.autoMotorReady?"true":"false")+"}";
     telemetryServer.send(200,"application/json",response);
   });
   telemetryServer.on("/measure",HTTP_POST,[](){
@@ -326,6 +507,8 @@ static void startTelemetryServer() {
 }
 }
 void setup() {
+  // Outputs default LOW. If pin macros are unset this configures nothing.
+  axis2HBridgeBegin();
   Serial.begin(115200);
   delay(700);
   Serial.println("MIDNIGHT_BRIDGE_V1 BOOT");
@@ -340,6 +523,9 @@ void setup() {
 }
 void loop() {
   telemetryServer.handleClient();
+  const bool wifiUp=wifiReady();
+  if(lastWifiConnected && !wifiUp)cameraHostGoToLinkLost();
+  lastWifiConnected=wifiUp;
   /* A STOP button on the camera cancels navigation and forces any pending
    * manual RA slew to stop. No new mount motion is ever triggered by USB. */
   CameraMountView camera={};
@@ -347,6 +533,7 @@ void loop() {
      camera.mailbox.command==2 &&
      camera.mailbox.commandSequence!=lastCameraStopCommand){
     lastCameraStopCommand=camera.mailbox.commandSequence;
+    cameraHostCancelGoTo();
     needStop=true;stopAt=0;
     Serial.println("CAMERA STOP_REQUESTED");
   }

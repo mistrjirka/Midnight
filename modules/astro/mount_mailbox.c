@@ -9,6 +9,7 @@ typedef struct {
     int32_t target_dec;
     uint32_t requested_id,completed_id,completed_point_sequence;
     uint8_t capture_state,command,target_valid;
+    astro_mount_progress report;
 } mount_mailbox_state;
 static volatile unsigned revision;
 static volatile unsigned writer_lock;
@@ -64,6 +65,7 @@ int astro_mount_mailbox_target(uint32_t ra,int32_t dec)
     if(!state.command_sequence)state.command_sequence++;
     state.target_ra=ra;state.target_dec=dec;
     state.target_valid=1;state.command=ASTRO_MOUNT_CMD_GOTO;
+    memset(&state.report,0,sizeof(state.report));
     write_end();
     return 1;
 }
@@ -73,6 +75,7 @@ void astro_mount_mailbox_stop(void)
     state.command_sequence++;
     if(!state.command_sequence)state.command_sequence++;
     state.command=ASTRO_MOUNT_CMD_STOP;
+    memset(&state.report,0,sizeof(state.report));
     write_end();
 }
 int astro_mount_mailbox_begin(uint32_t id)
@@ -133,4 +136,40 @@ void astro_mount_mailbox_encode(uint8_t out[ASTRO_MOUNT_MAILBOX_BYTES],uint32_t 
 uint32_t astro_mount_mailbox_last_requested(void)
 {
     return state.requested_id;
+}
+
+int astro_mount_mailbox_progress(uint32_t cmd_seq,uint32_t phase_and_arm,
+                                uint32_t err,uint32_t steps,uint32_t stage)
+{
+    const uint32_t phase=phase_and_arm&255u;
+    if(phase>8u || (phase_and_arm & ~0x1ffu) || err>3600000u ||
+       steps>100u || stage>6u)return 0;
+    write_begin();
+    int accepted=0;
+    if(cmd_seq!=0 && state.command_sequence==cmd_seq){
+        state.report.command_seq=cmd_seq;
+        state.report.error_e4=err;
+        state.report.steps=steps;
+        state.report.phase=(uint8_t)phase;
+        state.report.stage=(uint8_t)stage;
+        state.report.motor_ready=(phase_and_arm & 0x100u)!=0;
+        state.report.valid=1;
+        accepted=1;
+    }
+    write_end();
+    return accepted;
+}
+void astro_mount_mailbox_read_progress(astro_mount_progress *out)
+{
+    if(!out)return;
+    memset(out,0,sizeof(*out));
+    for(int i=0;i<6;i++){
+        const unsigned before=revision;
+        if(before&1u)continue;
+        __asm__ __volatile__("" ::: "memory");
+        memcpy(out,&state.report,sizeof(*out));
+        __asm__ __volatile__("" ::: "memory");
+        if(before==revision && !(revision&1u))return;
+    }
+    memset(out,0,sizeof(*out));
 }

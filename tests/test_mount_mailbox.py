@@ -36,6 +36,21 @@ int main(void){
  astro_mount_mailbox_encode(data,0);
  assert(data[24]==3 && u32(data+20)==112 && u32(data+28)==0);
  assert(data[26]==2 && u32(data+4)==2);
+ astro_mount_progress feedback={0};
+ assert(!astro_mount_mailbox_progress(1,3,990,2,1));
+ assert(!astro_mount_mailbox_progress(2,9,990,2,1));
+ assert(astro_mount_mailbox_progress(2,3,12345,8,4));
+ astro_mount_mailbox_read_progress(&feedback);
+ assert(feedback.valid && feedback.phase==3 && feedback.error_e4==12345);
+ assert(feedback.steps==8 && feedback.stage==4);
+ assert(astro_mount_mailbox_progress(2,3,1555,18,6));
+ astro_mount_mailbox_read_progress(&feedback);
+ assert(feedback.stage==6);
+ assert(!astro_mount_mailbox_progress(2,3,1555,18,7));
+ assert(astro_mount_mailbox_progress(2,0x103,12345,8,4));
+ astro_mount_mailbox_read_progress(&feedback);
+ assert(feedback.motor_ready==1);
+
  fwrite(data,1,32,stdout);
 }
 """

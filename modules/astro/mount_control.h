@@ -9,6 +9,7 @@ void astro_mount_sync_photo(void);
 void astro_mount_measure_photo(void);
 void astro_mount_status_menu(char *out,int size);
 void astro_mount_delta_menu(char *out,int size);
+void astro_mount_controller_menu(char *out,int size);
 /* The camera posts a target; the ESP32 polls it and owns navigation. */
 int astro_mount_send_selected_target(uint32_t ra,int32_t dec);
 void astro_mount_abort_target(void);

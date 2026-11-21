@@ -2,6 +2,7 @@
  * 0x9B32: read-only verified pointing
  * 0x9B33: enqueue a new saved-photo measurement (never block PTP)
  * 0x9B34: read-only target, capture request status and sequence
+ * 0x9B35: controller progress for camera menu (no motor action)
  * No camera opcode can move the mount. GPL-2.0-or-later.
  */
 #include <stdint.h>
@@ -18,7 +19,7 @@ static int camera_mount_ptp(
     uint32_t opcode,uint32_t session,uint32_t transaction,
     uint32_t p1,uint32_t p2,uint32_t p3,uint32_t p4,uint32_t p5)
 {
-    (void)priv;(void)p2;(void)p3;(void)p4;(void)p5;
+    (void)priv;
     uint8_t frame[ASTRO_TELEMETRY_BYTES];
     struct ptp_msg resp={
         .id=PTP_RC_OK,
@@ -33,6 +34,9 @@ static int camera_mount_ptp(
         if(!queued)resp.id=PTP_RC_DEVICE_BUSY;
         else DryosDebugMsg(0,15,"ASTRO_PTP capture request=%u %s",
                            p1,queued==2?"queued":"duplicate");
+    } else if(opcode==ASTRO_MOUNT_PROGRESS_OPCODE){
+        if(!astro_mount_mailbox_progress(p5,p1,p2,p3,p4))
+            resp.id=PTP_RC_ParameterNotSupported;
     } else if(opcode==ASTRO_TELEMETRY_PTP_OPCODE ||
               opcode==ASTRO_MOUNT_STATUS_OPCODE){
         const uint32_t now=(uint32_t)get_ms_clock();
@@ -83,7 +87,10 @@ int astro_ptp_register(void)
         ASTRO_MOUNT_CAPTURE_OPCODE,cb.registration,0);
     const int mailbox=(int)ptp_register_handler(
         ASTRO_MOUNT_STATUS_OPCODE,cb.registration,0);
-    DryosDebugMsg(0,15,"ASTRO_PTP register point=%d capture=%d mailbox=%d",
-                  point,capture,mailbox);
-    return point|capture|mailbox;
+    const int progress=(int)ptp_register_handler(
+        ASTRO_MOUNT_PROGRESS_OPCODE,cb.registration,0);
+    DryosDebugMsg(0,15,
+        "ASTRO_PTP register point=%d capture=%d mailbox=%d progress=%d",
+        point,capture,mailbox,progress);
+    return point|capture|mailbox|progress;
 }

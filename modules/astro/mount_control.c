@@ -144,6 +144,28 @@ void astro_mount_delta_menu(char *out,int size)
        y<0?'-':'+',(unsigned long)((y<0?-y:y)/10000),
        (unsigned long)((y<0?-y:y)%10000/100));
 }
+void astro_mount_controller_menu(char *out,int size)
+{
+    astro_mount_progress p={0};
+    astro_mount_mailbox_read_progress(&p);
+    if(!p.valid){
+        snprintf(out,size,"No link");
+        return;
+    }
+    const char *state="Unknown";
+    switch(p.phase){
+        case 0:state="Idle";break;
+        case 1:state="Request photo";break;
+        case 2:state="Measuring";break;
+        case 3:state=p.motor_ready?"Ready to move":"Motors missing";break;
+        case 4:state="Moving";break;
+        case 5:state="Settling";break;
+        case 6:state="On target";break;
+        case 7:state="Stopped";break;
+        case 8:state="Fault";break;
+    }
+    snprintf(out,size,"%s",state);
+}
 void astro_mount_goto_unavailable(void)
 {
     astro_set_status("GoTo disabled: motors not calibrated");

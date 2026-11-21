@@ -57,7 +57,7 @@ static int photo_calls=0,queue_calls=0;
 static uint8_t out[32];
 static int data_calls=0;
 static uint32_t response=0;
-static int (*handler[3])(void*,struct ptp_context*,void*,void*)={0};
+static int (*handler[4])(void*,struct ptp_context*,void*,void*)={0};
 uint32_t get_ms_clock(void){return 1150;}
 void DryosDebugMsg(int ch,int lvl,const char*fmt,...){
  (void)ch;(void)lvl;(void)fmt;
@@ -92,7 +92,7 @@ int astro_request(astro_action a){
 uint32_t ptp_register_handler(uint32_t op,
       int (*callback)(void*,struct ptp_context*,void*,void*),void *priv) {
  (void)priv;
- int index=op==0x9B32?0:op==0x9B33?1:op==0x9B34?2:-1;
+ int index=op==0x9B32?0:op==0x9B33?1:op==0x9B34?2:op==0x9B35?3:-1;
  if(index<0)return 1;
  handler[index]=callback;return 0;
 }
@@ -105,6 +105,19 @@ static int send_resp(struct ptp_handle*h,struct ptp_msg*reply) {
  (void)h;response=reply->id;return 0;
 }
 int astro_ptp_register(void);
+static void send_progress(uint32_t cmd_seq,uint32_t phase,uint32_t error){
+    union {
+       int (*short_abi)(void*,struct ptp_context*,void*,void*);
+       int (*full)(void*,struct ptp_context*,uint32_t,uint32_t,uint32_t,
+                   uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+    } cb;
+    cb.short_abi=handler[3];
+    struct ptp_context c={0};
+    c.send_data=send_data;
+    c.send_resp=send_resp;
+    response=0;
+    assert(cb.full(NULL,&c,0x9B35,1,7,phase,error,4,2,cmd_seq)==1);
+}
 static void call(int i,uint32_t id) {
  union {
    int (*short_abi)(void*,struct ptp_context*,void*,void*);
@@ -125,6 +138,14 @@ int main(void){
  call(2,0);
  assert(response==PTP_RC_OK && !memcmp(out,"MNC1",4));
  assert(value32(out+8)==1234567 && (int32_t)value32(out+12)==-420000);
+ send_progress(1,3,11800);
+ assert(response==PTP_RC_OK);
+ astro_mount_progress status={0};
+ astro_mount_mailbox_read_progress(&status);
+ assert(status.valid && status.phase==3 && status.error_e4==11800);
+ assert(status.steps==4 && status.stage==2 && !status.motor_ready);
+ send_progress(999,3,11800);
+ assert(response==PTP_RC_ParameterNotSupported);
  call(1,17);
  assert(response==PTP_RC_OK && queue_calls==1 && photo_calls==0);
  call(1,17);

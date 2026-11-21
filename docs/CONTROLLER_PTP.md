@@ -96,3 +96,14 @@ and only if the solution came from a newly captured still (source 5).
 The ESP32 enters MOTORS_UNAVAILABLE after it receives the first verified
 position, rather than moving without a confirmed second motor.
 USB hardware and real Canon shutter capture remain unverified.
+
+
+### GoTo progress status
+
+The ESP32 host sends progress to the camera through USB PTP operation
+0x9B35 with five unsigned parameters: phase and motor-ready flag,
+remaining angular error in 1e-4 degree, correction count, stage (0-6)
+and matching target command sequence. Midnight rejects stale status
+commands and displays the current phase in Mount control.
+
+The status command has no physical motor or shutter side effects.

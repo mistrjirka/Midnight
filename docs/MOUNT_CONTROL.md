@@ -54,3 +54,40 @@ Target transfer, remote photo requests, completion tracking and the
 controller's navigation state machine are implemented and unit-tested.
 **Actual motor GoTo stays disabled** until the USB connection and the
 second-axis motor/driver are physically tested.
+
+
+## Two-axis loop and H-bridge simulation
+
+The ESP32 feedback state machine takes two stationary photos to learn sky
+drift, tests both motors forward/backward, and requests another still
+photo after every bounded movement. The controller estimates signed
+movement vectors. This avoids assuming perpendicular axes or known motor
+speed. With tracking off, it subtracts observed sky drift before fitting
+motor response.
+
+The ESP32's second-axis H-bridge driver is included but pins are not
+configured. The OG RA drive has no guaranteed stop on lost Wi-Fi.
+Therefore automatic physical GoTo remains disabled.
+
+See docs/GOTO_HIL_TESTS.md for actual ESP32 simulation results.
+
+
+## Random camera orientation
+
+Point the camera generally at unobstructed sky and select a target. You
+do **not** need to pre-align either motor direction. Midnight first solves
+the camera's actual position, then the ESP32 learns each motor's signed
+sky vector from short forward/backward test moves. The camera is allowed
+to start at arbitrary RA and Dec, subject to a solvable star field and
+mechanical reach. Targets far away are handled as repeated <=5 degree
+local sky bearings and <=1 second motor pulses. The axes may be skewed.
+
+Tracking off is also allowed. Two photos taken while the motors are stopped
+measure sky drift. The ESP32 subtracts this drift from the motion used to
+calibrate motors. It refreshes the drift estimate when progress stalls or
+after a long move. Each pair of corrections is followed by another photo.
+
+**No gravity sensor or limit-switch data is available.** "Mostly up" is a
+physical setup condition, not proof that a particular GoTo path will avoid
+a tripod, cables, horizon or hard stop. Hardware safeguards must be
+installed before enabling automatic movement.

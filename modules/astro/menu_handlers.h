@@ -24,6 +24,7 @@ MENU_SELECT_FUNC(astro_menu_mount_stop);
 MENU_UPDATE_FUNC(astro_menu_mount_status);
 MENU_UPDATE_FUNC(astro_menu_mount_delta);
 MENU_UPDATE_FUNC(astro_menu_mount_goto_update);
+MENU_UPDATE_FUNC(astro_menu_mount_controller_update);
 MENU_UPDATE_FUNC(astro_menu_mount_exposure_update);
 
 MENU_UPDATE_FUNC(astro_menu_status_update);

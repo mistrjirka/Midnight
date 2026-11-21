@@ -86,7 +86,7 @@ static int send_resp(struct ptp_handle *h,struct ptp_msg *m){
 int main(void){
     astro_telemetry_publish(100,2350021,-145123,340,12,ASTRO_SOURCE_LIVE);
     if(astro_ptp_register()!=0 || !callback || opcode!=0x9B32 ||
-       registrations!=3)return 2;
+       registrations!=4)return 2;
     union {
         int (*short_abi)(void*,struct ptp_context*,void*,void*);
         int (*actual)(void*,struct ptp_context*,uint32_t,uint32_t,uint32_t,

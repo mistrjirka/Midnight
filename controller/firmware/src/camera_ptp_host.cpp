@@ -7,6 +7,8 @@
 #include "ptp_wire.h"
 #include "mount_mailbox_wire.h"
 #include "mount_coordinator.h"
+#include "goto_loop.h"
+#include "goto_motors.h"
 #include <esp_system.h>
 #include <Arduino.h>
 #include <cstring>
@@ -28,6 +30,7 @@ static constexpr uint16_t OP_OPEN_SESSION=0x1002;
 static constexpr uint16_t OP_MIDNIGHT_POINT=0x9B32;
 static constexpr uint16_t OP_CAPTURE_STILL=0x9B33;
 static constexpr uint16_t OP_MOUNT_MAILBOX=0x9B34;
+static constexpr uint16_t OP_MOUNT_PROGRESS=0x9B35;
 static constexpr uint16_t RESPONSE_OK=0x2001;
 static constexpr uint32_t POLL_INTERVAL_MS=1500;
 static constexpr uint32_t TRANSFER_TIMEOUT_MS=2000;
@@ -49,6 +52,12 @@ static std::atomic<uint32_t> lastIssuedPhotoId{0};
 static uint32_t photoStartedAt=0;
 static constexpr uint32_t CAPTURE_DEADLINE_MS=75000;
 static MountCoordinator navigation;
+static GoToLoop gotoLoop;
+static GoToMotorPort gotoMotors;
+static std::atomic<bool> cancelRequested{false},linkLostRequested{false};
+static uint32_t lastProgressSeq=0,lastProgressError=0,lastProgressStep=0;
+static uint32_t lastProgressAttempt=0;
+static uint8_t lastProgressPhase=255,lastProgressStage=255;
 static CameraMountMailbox lastMailbox={};
 static bool mailboxValid=false;
 static CameraMountView mountPublished={};
@@ -88,6 +97,13 @@ static void publishMountSnapshot(){
     snapshot.lastPhotoDec=navigation.lastPhotoDec();
     snapshot.photoState=photoStatus.load();
     snapshot.lastRequestId=lastIssuedPhotoId.load();
+    snapshot.loopPhase=gotoLoop.phase();
+    snapshot.loopStage=gotoLoop.stage();
+    snapshot.loopFault=gotoLoop.failure();
+    snapshot.loopErrorE4=gotoLoop.errorE4();
+    snapshot.loopCorrections=gotoLoop.steps();
+    snapshot.autoMotorReady=gotoMotors.ready();
+    snapshot.nextPulseValid=gotoLoop.nextPulse(snapshot.nextPulse);
     portENTER_CRITICAL(&mutex);
     mountPublished=snapshot;
     portEXIT_CRITICAL(&mutex);
@@ -208,6 +224,19 @@ static bool execute(uint16_t opcode,bool hasParam=false,uint32_t argument=0,
     }
     return true;
 }
+/* The controller sends a small, versioned status update to Canon. The
+ * camera only displays it; this opcode cannot move or fire anything. */
+static bool sendProgress(uint16_t opcode,const uint32_t params[5]){
+    if(!outTransfer || !params)return false;
+    const uint32_t transaction=++tid;
+    txRequests++;
+    uint8_t *p=outTransfer->data_buffer;
+    w32(p,32);w16(p+4,1);w16(p+6,opcode);w32(p+8,transaction);
+    for(unsigned i=0;i<5;i++)w32(p+12+4*i,params[i]);
+    outTransfer->num_bytes=32;
+    if(!transfer(outTransfer))return false;
+    return readPtp(3,RESPONSE_OK,transaction);
+}
 static bool findImageInterface(const usb_config_desc_t *cfg) {
     if(!cfg || cfg->wTotalLength<cfg->bLength)return false;
     int currentInterface=-1,alt=0;
@@ -253,7 +282,12 @@ static void disconnect() {
     if(activePhotoId.exchange(0) || queuedPhotoId.exchange(0))
         photoStatus=CameraPhotoState::FAILED;
     mailboxValid=false;
+    lastProgressSeq=0;
+    lastProgressPhase=255;
+    lastProgressStage=255;
     navigation.linkFailed();
+    gotoLoop.fault(GoToFault::CONNECTION);
+    gotoMotors.emergencyStop();
     publishMountSnapshot();
     setState("AWAIT_CAMERA");
 }
@@ -316,6 +350,33 @@ static void daemon(void*) {
 static void clientTask(void*) {
     for(;;) {
         usb_host_client_handle_events(client,pdMS_TO_TICKS(40));
+        if(cancelRequested.exchange(false)){
+            gotoMotors.emergencyStop();
+            gotoLoop.cancel();
+            if(queuedPhotoId.exchange(0)){
+                photoStatus=CameraPhotoState::FAILED;
+                hostLog("goto_queued_photo_cancelled");
+            }
+            hostLog("goto_cancelled");
+        }
+        if(linkLostRequested.exchange(false)){
+            gotoMotors.emergencyStop();
+            gotoLoop.fault(GoToFault::CONNECTION);
+            hostLog("goto_tracker_link_lost");
+        }
+        gotoLoop.tick(millis());
+        if(gotoLoop.pulseInProgress()){
+            const GoToMotorStatus motor=gotoMotors.poll(millis());
+            if(motor==GoToMotorStatus::STOP_CONFIRMED)
+                gotoLoop.pulseStopped(true,millis());
+            else if(motor==GoToMotorStatus::FAILED ||
+                    motor==GoToMotorStatus::UNAVAILABLE){
+                gotoLoop.pulseStopped(false,millis());
+                gotoMotors.emergencyStop();
+            }
+        }
+        if(gotoLoop.phase()==GoToPhase::FAULT)
+            gotoMotors.emergencyStop();
         if(gone){
             if(!transferInFlight)disconnect();
             continue;
@@ -343,6 +404,9 @@ static void clientTask(void*) {
                 hostLog("camera_capture_rejected id=%lu",(unsigned long)photo);
             }
             navigation.photoSent(photo,accepted);
+            if(!accepted && gotoLoop.photoId()==photo &&
+               gotoLoop.phase()==GoToPhase::WAIT_PHOTO)
+                gotoLoop.fault(GoToFault::BAD_PHOTO);
             publishMountSnapshot();
         }
         if(uint32_t(millis()-lastPoll)<POLL_INTERVAL_MS)continue;
@@ -376,6 +440,16 @@ static void clientTask(void*) {
                 mailboxValid=true;
                 navigation.observeMailbox(latest);
                 if(latest.commandSequence!=oldCmd && latest.commandSequence){
+                    // Every new target explicitly resets the previous feedback
+                    // history. A Stop is always high priority.
+                    gotoMotors.emergencyStop();
+                    if(latest.command==1 && latest.targetValid){
+                        gotoLoop.start(latest.targetRa,latest.targetDec,millis());
+                    }else if(latest.command==2){
+                        gotoLoop.cancel();
+                    }else{
+                        gotoLoop.fault(GoToFault::INVALID_TARGET);
+                    }
                     hostLog("camera_command seq=%lu cmd=%u ra=%lu dec=%ld",
                         (unsigned long)latest.commandSequence,latest.command,
                         (unsigned long)latest.targetRa,(long)latest.targetDec);
@@ -401,6 +475,12 @@ static void clientTask(void*) {
                        point.sequence==latest.pointSequence &&
                        usableLivePointing(point) &&
                        uint32_t(millis()-at)+point.ageAtReadMs<65000){
+                        if(gotoLoop.phase()==GoToPhase::WAIT_PHOTO &&
+                           gotoLoop.photoId()==active){
+                            if(!gotoLoop.finishPhoto(active,point,millis()))
+                                hostLog("goto_photo_rejected id=%lu fault=%u",
+                                        (unsigned long)active,(unsigned)gotoLoop.failure());
+                        }
                         activePhotoId=0;
                         photoStatus=CameraPhotoState::COMPLETE;
                         hostLog("camera_capture_complete id=%lu seq=%lu",
@@ -420,12 +500,59 @@ static void clientTask(void*) {
             activePhotoId=0;
             photoStatus=CameraPhotoState::TIMED_OUT;
             navigation.linkFailed();
+            gotoLoop.fault(GoToFault::PHOTO_TIMEOUT);
         }
-        if(navigation.needsPhoto() && !activePhotoId && !queuedPhotoId){
+        // An armed motor adapter must provide stop acknowledgement before
+        // feedback is permitted. This firmware has no axis-2 adapter, so
+        // ready() is always false, even if the camera sends GoTo.
+        if(gotoLoop.needsPulse() && gotoMotors.ready()){
+            mount_pulse pulse={};
+            if(gotoLoop.nextPulse(pulse) && gotoMotors.pulse(pulse,millis())){
+                gotoLoop.pulseStarted(millis());
+                hostLog("goto_pulse axis=%d dir=%d ms=%lu",
+                        pulse.axis,pulse.direction,(unsigned long)pulse.duration_ms);
+            }else gotoLoop.fault(GoToFault::MOTOR_START);
+        }
+        if(gotoLoop.needsPhoto() && !activePhotoId && !queuedPhotoId){
             uint32_t id=0;
             if(cameraHostRequestMeasure(id)){
+                gotoLoop.beginPhoto(id,millis());
                 navigation.photoQueued(id);
-                hostLog("nav_requested_still id=%lu",(unsigned long)id);
+                hostLog("goto_requested_still id=%lu stage=%u",
+                        (unsigned long)id,(unsigned)gotoLoop.stage());
+            }
+        }
+        /* Report progress back to the camera. The operation is idempotent
+         * for each camera command sequence, and gets rate-limited if its
+         * firmware does not implement status reception. */
+        const uint32_t now=millis();
+        if(mailboxValid && lastMailbox.commandSequence){
+            const uint8_t phase=(uint8_t)gotoLoop.phase();
+            const uint8_t stage=(uint8_t)gotoLoop.stage();
+            const uint32_t error=gotoLoop.errorE4();
+            const uint32_t steps=gotoLoop.steps();
+            const bool changed=lastProgressSeq!=lastMailbox.commandSequence ||
+                               lastProgressPhase!=phase ||
+                               lastProgressStage!=stage ||
+                               lastProgressStep!=steps ||
+                               (error>lastProgressError?error-lastProgressError:
+                                                      lastProgressError-error)>150;
+            if(changed && (lastProgressAttempt==0 ||
+                           uint32_t(now-lastProgressAttempt)>=3000)){
+                lastProgressAttempt=now;
+                const uint32_t params[5]={
+                    uint32_t(phase)|(gotoMotors.ready()?0x100u:0u),
+                    error,steps,stage,lastMailbox.commandSequence
+                };
+                if(sendProgress(OP_MOUNT_PROGRESS,params)){
+                    lastProgressSeq=lastMailbox.commandSequence;
+                    lastProgressPhase=phase;lastProgressStage=stage;
+                    lastProgressStep=steps;lastProgressError=error;
+                    hostLog("camera_progress phase=%u stage=%u err=%lu steps=%lu",
+                            phase,stage,(unsigned long)error,(unsigned long)steps);
+                }else{
+                    hostLog("camera_progress_ptp_failed");
+                }
             }
         }
         publishMountSnapshot();
@@ -529,3 +656,42 @@ const char *cameraHostNavigationStatus(MountNavState p){
     }
     return "INVALID";
 }
+
+const char *cameraHostLoopStatus(GoToPhase phase,bool motors){
+    switch(phase){
+        case GoToPhase::IDLE:return "IDLE";
+        case GoToPhase::NEED_PHOTO:return "NEED_PHOTO";
+        case GoToPhase::WAIT_PHOTO:return "WAIT_PHOTO";
+        case GoToPhase::NEED_MOTOR:return motors?"NEED_PULSE":"WAIT_MOTORS";
+        case GoToPhase::MOVING:return "MOVING";
+        case GoToPhase::SETTLING:return "SETTLING";
+        case GoToPhase::ARRIVED:return "ARRIVED";
+        case GoToPhase::STOPPED:return "STOPPED";
+        case GoToPhase::FAULT:return "FAULT";
+    }
+    return "INVALID";
+}
+const char *cameraHostLoopFault(GoToFault code){
+    switch(code){
+        case GoToFault::NONE:return "NONE";
+        case GoToFault::INVALID_TARGET:return "INVALID_TARGET";
+        case GoToFault::INVALID_POSITION:return "INVALID_POSITION";
+        case GoToFault::BAD_PHOTO:return "BAD_PHOTO";
+        case GoToFault::DRIFT_SAMPLE:return "DRIFT_SAMPLE";
+        case GoToFault::PHOTO_TIMEOUT:return "PHOTO_TIMEOUT";
+        case GoToFault::MOTOR_START:return "MOTOR_START";
+        case GoToFault::MOTOR_STOP:return "MOTOR_STOP";
+        case GoToFault::MOTOR_TIMEOUT:return "MOTOR_TIMEOUT";
+        case GoToFault::CALIBRATION:return "CALIBRATION";
+        case GoToFault::BAD_AXES:return "BAD_AXES";
+        case GoToFault::TOO_FAR:return "TOO_FAR";
+        case GoToFault::NO_PROGRESS:return "NO_PROGRESS";
+        case GoToFault::MAX_STEPS:return "MAX_STEPS";
+        case GoToFault::TOTAL_TIMEOUT:return "TOTAL_TIMEOUT";
+        case GoToFault::CONNECTION:return "CONNECTION";
+    }
+    return "UNKNOWN";
+}
+
+void cameraHostCancelGoTo(){cancelRequested=true;}
+void cameraHostGoToLinkLost(){linkLostRequested=true;}

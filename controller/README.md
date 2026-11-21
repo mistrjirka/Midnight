@@ -92,3 +92,39 @@ While the ESP32 is on the tracker Wi-Fi AP, use the new endpoints:
 
 Before USB host mode, serial commands CAMERA STATUS, CAMERA TARGET and
 CAMERA MEASURE inspect the same state or queue a photo.
+
+
+## Closed-loop GoTo and second-axis H-bridge
+
+The production ESP32 firmware includes an empirical two-axis feedback
+controller. It requests two photos while stationary to measure apparent
+sky drift with tracking on or off. Then it uses bounded pulses in both
+directions of each axis. After every move it requests a new still photo and
+fits signed east/north motor vectors. Reversed wires and non-perpendicular
+motor axes are handled by those measured vectors.
+
+The second axis has a DC H-bridge implementation with IN1/IN2 direction
+pins, optional ENABLE/ESTOP, a local watchdog, a 20 ms reversal deadtime,
+and 50-1000 ms pulse lengths. It remains unconfigured until the wiring
+and emergency cutoff are confirmed.
+
+Real ESP32-S3 hardware-in-the-loop tests used 32-byte MNT1/MNC1 camera
+packets with both physical motor directions deliberately reversed and
+tracking ON/OFF. No real motor commands are issued in the simulation.
+
+See docs/GOTO_HIL_TESTS.md for wiring, validation and reproduction.
+
+
+### Arbitrary starting position
+
+The controller learns its starting RA/Dec from a still photo. It computes
+spherical great-circle bearings, not a guessed motor direction. Each signed
+motor vector is calibrated with test pulses, so the camera may start at any
+solvable sky position and the physical motor polarity can be reversed.
+Motor axes need not be perpendicular. Long travel uses repeated short
+waypoint vectors and re-solving after paired corrections. See the
+randomized validation results in docs/GOTO_HIL_TESTS.md.
+
+The operator must still point the camera at clear sky and verify mechanical
+travel limits. No hardware pose, horizon, cable collision or endstop sensor
+is available yet. The real automatic motors remain unarmed.
