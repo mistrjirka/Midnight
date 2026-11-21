@@ -21,3 +21,20 @@ Wire payload (all multi-byte integers little-endian):
 On camera startup or before the first successful solution, validity is zero. A previous valid solution may be stale. The camera stores the *capture time*, not the time at which a potentially slow solver completed. The receiver uses readout time minus capture time to reject old data. Poller stores a second clock for time spent since USB receipt. Only source 1 or 4 with total age under 10 seconds is eligible for future closed-loop control. The prototype never starts automatic GoTo from pointing data.
 
 The ESP32's serial `POINT` command is a **test-only** injection and not the PTP transport. USB-host integration and physical camera validation remain necessary.
+
+## Validation and limitations (November 21, 2026)
+
+- Verified in Canon 600D 1.0.2 QEMU: the current GCC-built Midnight
+  module registers opcode `0x9B32` (reported registration result `0`),
+  and its unchanged sky solver solves the bundled image with 11 matches.
+- Verified in a host integration test: the production camera callback
+  generates a 32-byte pointing payload, and the production ESP32 decoder
+  receives and validates it across fragmented simulated PTP bulk transfers.
+- The ESP32 USB host compiles and is flashed on grammetry, but the physical
+  Canon-to-ESP32 OTG link has **not** been connected or tested.
+- QEMU does not prove real camera USB electrical compatibility. Do not use
+  synthetic or gallery coordinates as automatic mount-movement targets.
+
+Diagnostics are available at `/diagnostics` on port 8081 while connected
+to the OG Star Tracker Wi-Fi, and through `HOST LOG` on the serial port
+before switching the ESP32 to host mode. See `controller/README.md`.

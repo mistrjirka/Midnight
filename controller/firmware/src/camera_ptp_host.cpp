@@ -4,8 +4,12 @@
  * GPL-2.0-or-later.
  */
 #include "camera_ptp_host.h"
+#include "ptp_wire.h"
 #include <Arduino.h>
 #include <cstring>
+#include <cstdarg>
+#include <atomic>
+#include <cstdio>
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 #include "usb/usb_host.h"
@@ -30,18 +34,37 @@ static volatile bool gone=false;
 static volatile bool transferDone=false;
 static volatile bool transferInFlight=false;
 static volatile bool running=false;
-static volatile const char *state="OFF";
+static std::atomic<const char*> state{"OFF"};
 static uint32_t tid=0,lastPoll=0;
 static bool sessionOpened=false,claimed=false;
 static CameraPointing recent={};
 static uint32_t recentTime=0;
+static PtpWireReader wireReader;
+static constexpr size_t LOG_COUNT=32;
+struct LogRecord {uint32_t ms;char message[92];};
+static LogRecord logRecords[LOG_COUNT]={};
+static size_t logHead=0,logUsed=0;
+static std::atomic<uint32_t> txRequests{0},rxPackets{0},ptpErrors{0};
+static portMUX_TYPE logMutex=portMUX_INITIALIZER_UNLOCKED;
+static void hostLog(const char *fmt, ...) {
+    char line[92]={};
+    va_list args;
+    va_start(args,fmt);
+    vsnprintf(line,sizeof(line),fmt,args);
+    va_end(args);
+    portENTER_CRITICAL(&logMutex);
+    logRecords[logHead].ms=millis();
+    memcpy(logRecords[logHead].message,line,sizeof(line));
+    logHead=(logHead+1)%LOG_COUNT;
+    if(logUsed<LOG_COUNT)logUsed++;
+    portEXIT_CRITICAL(&logMutex);
+}
+
 static portMUX_TYPE mutex=portMUX_INITIALIZER_UNLOCKED;
 
-static void setState(const char *s) { state=s; }
-static uint16_t u16(const uint8_t*p) {return uint16_t(p[0])|(uint16_t(p[1])<<8);}
-static uint32_t u32(const uint8_t*p) {
-    return uint32_t(p[0])|(uint32_t(p[1])<<8)|
-           (uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
+static void setState(const char *s) {
+    const char* previous=state.exchange(s,std::memory_order_acq_rel);
+    if(strcmp(previous,s))hostLog("state %s -> %s",previous,s);
 }
 static void w16(uint8_t*p,uint16_t v){p[0]=uint8_t(v);p[1]=uint8_t(v>>8);}
 static void w32(uint8_t*p,uint32_t v){
@@ -54,12 +77,21 @@ static void complete(usb_transfer_t*) {
 static bool transfer(usb_transfer_t *item, uint32_t timeout=TRANSFER_TIMEOUT_MS) {
     if(gone || !item || transferInFlight) return false;
     transferDone=false;
-    if (usb_host_transfer_submit(item)!=ESP_OK) return false;
-    transferInFlight=true;
+    transferInFlight=true; // Set before submit because callback may complete immediately.
+    const esp_err_t submit=usb_host_transfer_submit(item);
+    if (submit!=ESP_OK) {
+        transferInFlight=false;
+        hostLog("usb_submit ep=%02X error=%d",item->bEndpointAddress,submit);
+        ptpErrors++;
+        return false;
+    }
     uint32_t start=millis();
     while(!transferDone && !gone && uint32_t(millis()-start)<timeout)
         usb_host_client_handle_events(client,pdMS_TO_TICKS(20));
     if(!transferDone) {
+        hostLog("usb_timeout ep=%02X elapsed_ms=%u",item->bEndpointAddress,
+                (unsigned)(millis()-start));
+        ptpErrors++;
         /* A delayed callback may arrive after a timeout. Do not free or
          * reuse the DMA buffer while it is still owned by the driver. */
         usb_host_endpoint_halt(device,item->bEndpointAddress);
@@ -69,7 +101,13 @@ static bool transfer(usb_transfer_t *item, uint32_t timeout=TRANSFER_TIMEOUT_MS)
             usb_host_client_handle_events(client,pdMS_TO_TICKS(20));
         return false;
     }
-    return item->status==USB_TRANSFER_STATUS_COMPLETED;
+    if(item->status!=USB_TRANSFER_STATUS_COMPLETED) {
+        hostLog("usb_error ep=%02X status=%d",item->bEndpointAddress,item->status);
+        ptpErrors++;
+        return false;
+    }
+    rxPackets++;
+    return true;
 }
 static bool writeCmd(uint16_t opcode,uint32_t txn,bool param=false,uint32_t argument=0) {
     if(!outTransfer)return false;
@@ -79,25 +117,65 @@ static bool writeCmd(uint16_t opcode,uint32_t txn,bool param=false,uint32_t argu
     outTransfer->num_bytes=param?16:12;
     return transfer(outTransfer);
 }
+/* USB bulk transfers may split or combine PTP containers.
+ * Preserve trailing bytes for the following PTP response. */
 static bool readPtp(uint16_t expectedType,uint16_t expectedCode,
                     uint32_t txn,uint8_t *payload=nullptr,size_t expectedLength=0) {
     if(!inTransfer)return false;
-    inTransfer->num_bytes=256; // Full-speed bulk IN requests must be MPS-aligned.
-    if(!transfer(inTransfer))return false;
-    size_t n=inTransfer->actual_num_bytes;
-    const uint8_t *p=inTransfer->data_buffer;
-    if(n<12 || u32(p)!=n || u16(p+4)!=expectedType ||
-       u16(p+6)!=expectedCode || u32(p+8)!=txn ||
-       n!=12+expectedLength)return false;
-    if(expectedLength && payload)memcpy(payload,p+12,expectedLength);
-    return true;
+    const uint32_t started=millis();
+    for(int attempts=0;attempts<8 && millis()-started<5000;attempts++) {
+        PtpContainer parsed={};
+        const PtpWireReader::Result available=wireReader.next(parsed);
+        if(available==PtpWireReader::BAD_FRAME) {
+            hostLog("ptp_invalid_header txn=%lu",(unsigned long)txn);
+            ptpErrors++;
+            return false;
+        }
+        if(available==PtpWireReader::FRAME_READY) {
+            if(parsed.type!=expectedType || parsed.code!=expectedCode ||
+               parsed.transaction!=txn || parsed.payloadSize!=expectedLength) {
+                hostLog("ptp_unexpected got=%u/%04X/%lu/%u expected=%u/%04X/%lu/%u",
+                        parsed.type,parsed.code,(unsigned long)parsed.transaction,
+                        (unsigned)parsed.payloadSize,expectedType,expectedCode,
+                        (unsigned long)txn,(unsigned)expectedLength);
+                ptpErrors++;
+                return false;
+            }
+            if(payload && expectedLength)memcpy(payload,parsed.payload,expectedLength);
+            return true;
+        }
+        inTransfer->num_bytes=256; // Bulk IN transfer length must be MPS aligned.
+        if(!transfer(inTransfer))return false;
+        const int count=inTransfer->actual_num_bytes;
+        if(count<=0 || count>256 ||
+           !wireReader.feed(inTransfer->data_buffer,(size_t)count)) {
+            hostLog("ptp_bad_chunk bytes=%d",count);
+            ptpErrors++;
+            return false;
+        }
+    }
+    hostLog("ptp_fragment_timeout txn=%lu buffered=%u",
+            (unsigned long)txn,(unsigned)wireReader.buffered());
+    ptpErrors++;
+    return false;
 }
 static bool execute(uint16_t opcode,bool hasParam=false,uint32_t argument=0,
                     uint8_t *reply=nullptr,size_t len=0) {
     const uint32_t transaction=++tid;
-    if(!writeCmd(opcode,transaction,hasParam,argument))return false;
-    if(len && !readPtp(2,opcode,transaction,reply,len))return false;
-    return readPtp(3,RESPONSE_OK,transaction);
+    txRequests++;
+    if(!writeCmd(opcode,transaction,hasParam,argument)) {
+        hostLog("ptp_command_write_failed op=%04X txn=%lu",opcode,(unsigned long)transaction);
+        return false;
+    }
+    if(len && !readPtp(2,opcode,transaction,reply,len)) {
+        hostLog("ptp_data_failed op=%04X txn=%lu",opcode,(unsigned long)transaction);
+        return false;
+    }
+    if(!readPtp(3,RESPONSE_OK,transaction)) {
+        hostLog("ptp_response_failed op=%04X txn=%lu",opcode,(unsigned long)transaction);
+        return false;
+    }
+    return true;
 }
 static bool findImageInterface(const usb_config_desc_t *cfg) {
     if(!cfg || cfg->wTotalLength<cfg->bLength)return false;
@@ -134,6 +212,7 @@ static void disconnect() {
     /* Do not free a DMA buffer until its completion callback has returned.
      * A disconnected camera can leave a canceled transfer pending briefly. */
     if(transferInFlight)return;
+    wireReader.reset();
     if(outTransfer) usb_host_transfer_free(outTransfer);
     if(inTransfer) usb_host_transfer_free(inTransfer);
     outTransfer=inTransfer=nullptr;
@@ -143,12 +222,14 @@ static void disconnect() {
     setState("AWAIT_CAMERA");
 }
 static void newDevice(uint8_t address) {
+    hostLog("usb_attach addr=%u",address);
     if(device) return;
     usb_device_handle_t dev=nullptr;
     if(usb_host_device_open(client,address,&dev)!=ESP_OK)return;
     const usb_config_desc_t *cfg=nullptr;
     if(usb_host_get_active_config_descriptor(dev,&cfg)!=ESP_OK ||
        !findImageInterface(cfg)){
+        hostLog("usb_non_ptp addr=%u",address);
         usb_host_device_close(client,dev);
         setState("NOT_A_PTP_CAMERA");return;
     }
@@ -156,6 +237,11 @@ static void newDevice(uint8_t address) {
         usb_host_device_close(client,dev);setState("PTP_CLAIM_FAILED");return;
     }
     claimed=true;device=dev;gone=false;
+    wireReader.reset();
+    const usb_device_desc_t *desc=nullptr;
+    if(usb_host_get_device_descriptor(dev,&desc)==ESP_OK && desc)
+        hostLog("usb_ptp vid=%04X pid=%04X interface=%u IN=%02X OUT=%02X",
+                desc->idVendor,desc->idProduct,iface,bulkIn,bulkOut);
     if(usb_host_transfer_alloc(256,0,&outTransfer)!=ESP_OK ||
        usb_host_transfer_alloc(256,0,&inTransfer)!=ESP_OK) {
         disconnect();setState("NO_USB_BUFFERS");return;
@@ -173,8 +259,10 @@ static void newDevice(uint8_t address) {
 static void event(const usb_host_client_event_msg_t *msg,void*) {
     if(msg->event==USB_HOST_CLIENT_EVENT_NEW_DEV)
         newDevice(msg->new_dev.address);
-    if(msg->event==USB_HOST_CLIENT_EVENT_DEV_GONE && msg->dev_gone.dev_hdl==device)
+    if(msg->event==USB_HOST_CLIENT_EVENT_DEV_GONE && msg->dev_gone.dev_hdl==device) {
+        hostLog("usb_disconnected");
         gone=true;
+    }
 }
 #if CONFIG_USB_HOST_ENABLE_ENUM_FILTER_CALLBACK
 static bool filter(const usb_device_desc_t *,uint8_t *config) {
@@ -214,15 +302,23 @@ static void clientTask(void*) {
         CameraPointing p={};
         if(parseCameraPointing(bytes,sizeof(bytes),p) && p.valid) {
             portENTER_CRITICAL(&mutex);
+            const bool newPoint=!recent.valid || recent.sequence!=p.sequence;
             recent=p;recentTime=millis();
             portEXIT_CRITICAL(&mutex);
+            if(newPoint)hostLog("point seq=%lu ra=%lu dec=%ld matches=%u src=%u age=%lu",
+                (unsigned long)p.sequence,(unsigned long)p.ra,(long)p.dec,
+                p.matches,p.source,(unsigned long)p.ageAtReadMs);
             setState("POINT_READY");
-        } else setState("NO_VERIFIED_POINT");
+        } else {
+            if(p.valid)hostLog("point_rejected format_or_bounds");
+            setState("NO_VERIFIED_POINT");
+        }
     }
 }
 }
 void cameraHostStart(){
     if(running)return;
+    hostLog("usb_host_requested");
     USBHostBoardInit(); // Board-specific VBUS enable, if implemented.
     usb_host_config_t config={};
     config.intr_flags=ESP_INTR_FLAG_LEVEL1;
@@ -241,10 +337,31 @@ void cameraHostStart(){
     running=true;setState("AWAIT_CAMERA");
 }
 bool cameraHostRunning(){return running;}
-const char *cameraHostState(){return (const char*)state;}
+const char *cameraHostState(){return state.load(std::memory_order_acquire);}
 bool cameraHostLatest(CameraPointing &out,uint32_t &at){
     portENTER_CRITICAL(&mutex);
     out=recent;at=recentTime;
     portEXIT_CRITICAL(&mutex);
     return out.valid;
+}
+
+String cameraHostDiagnostics(){
+    LogRecord copy[LOG_COUNT]={};
+    size_t head=0,used=0;
+    portENTER_CRITICAL(&logMutex);
+    memcpy(copy,logRecords,sizeof(copy));
+    head=logHead; used=logUsed;
+    portEXIT_CRITICAL(&logMutex);
+    String result;
+    result.reserve(4600);
+    result+=String("Midnight PTP host=")+cameraHostState()+
+            " uptime_ms="+String(millis())+
+            " requests="+String((unsigned long)txRequests.load())+
+            " usb_transfers="+String((unsigned long)rxPackets.load())+
+            " errors="+String((unsigned long)ptpErrors.load())+"\n";
+    for(size_t i=0;i<used;i++){
+        const auto &item=copy[(head+LOG_COUNT-used+i)%LOG_COUNT];
+        result+=String(item.ms)+" "+item.message+"\n";
+    }
+    return result;
 }

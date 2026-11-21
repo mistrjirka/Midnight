@@ -12,7 +12,19 @@ static int camera_telemetry_ptp(
 {
     (void)priv;(void)opcode;(void)p1;(void)p2;(void)p3;(void)p4;(void)p5;
     uint8_t frame[ASTRO_TELEMETRY_BYTES];
-    astro_telemetry_encode(frame,(uint32_t)get_ms_clock());
+    const uint32_t now=(uint32_t)get_ms_clock();
+    astro_telemetry_encode(frame,now);
+    static uint32_t last_log=0,last_sequence=0;
+    const uint32_t sequence=(uint32_t)frame[4] |
+        ((uint32_t)frame[5]<<8) | ((uint32_t)frame[6]<<16) |
+        ((uint32_t)frame[7]<<24);
+    if(sequence!=last_sequence || (uint32_t)(now-last_log)>10000) {
+        DryosDebugMsg(0,15,"ASTRO_PTP read opcode=0x%04X seq=%u valid=%u src=%u matches=%u",
+            (unsigned)ASTRO_TELEMETRY_PTP_OPCODE,(unsigned)sequence,
+            (unsigned)frame[25],(unsigned)frame[24],
+            (unsigned)((uint16_t)frame[22] | ((uint16_t)frame[23]<<8)));
+        last_log=now;last_sequence=sequence;
+    }
     struct ptp_msg resp = {
         .id=PTP_RC_OK,
         .session=session,
@@ -20,8 +32,10 @@ static int camera_telemetry_ptp(
         .param_count=0
     };
     if(context->send_data(context->handle,frame,sizeof(frame),
-                          sizeof(frame),0,0,0))
+                          sizeof(frame),0,0,0)) {
+        DryosDebugMsg(0,15,"ASTRO_PTP USB data send failed");
         resp.id=PTP_RC_GeneralError;
+    }
     context->send_resp(context->handle,&resp);
     return 1;
 }
@@ -29,8 +43,19 @@ int astro_ptp_register(void)
 {
     /* Same DryOS API used by Magic Lantern's built-in vendor PTP commands.
      * The handler remains registered until camera restart. */
-    return (int)ptp_register_handler(
-        ASTRO_TELEMETRY_PTP_OPCODE,
-        (int (*)(void*,struct ptp_context*,void*,void*))camera_telemetry_ptp,
-        0);
+    /* Magic Lantern PTP_HANDLER callbacks receive 10 arguments on DryOS.
+     * The exported ptp_register_handler declaration incorrectly lists only
+     * four. Preserve the working PTP_HANDLER ABI without an incompatible
+     * direct function-pointer cast that breaks modern GCC -Werror. */
+    union {
+        int (*registration)(void*,struct ptp_context*,void*,void*);
+        int (*canon_abi)(void*,struct ptp_context*,uint32_t,uint32_t,uint32_t,
+                         uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+    } cb;
+    cb.canon_abi=camera_telemetry_ptp;
+    const int result=(int)ptp_register_handler(
+        ASTRO_TELEMETRY_PTP_OPCODE,cb.registration,0);
+    DryosDebugMsg(0,15,"ASTRO_PTP registered opcode=0x%04X result=%d",
+                  ASTRO_TELEMETRY_PTP_OPCODE,result);
+    return result;
 }

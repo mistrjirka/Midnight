@@ -149,7 +149,7 @@ void handleLine(char *command) {
     const int n=WiFi.scanNetworks(false,true,false,180);
     Serial.printf("SCAN COUNT %d\n",n);
     for(int i=0;i<n && i<30;++i)
-        Serial.printf("SCAN %s RSSI %d\n",WiFi.SSID(i).c_str(),WiFi.RSSI(i));
+        Serial.printf("SCAN %s RSSI %ld\n",WiFi.SSID(i).c_str(),(long)WiFi.RSSI(i));
     WiFi.scanDelete();
     reconnectAt=millis()+2000;
   }
@@ -162,7 +162,9 @@ void handleLine(char *command) {
       Serial.printf("HOST %s\n",cameraHostState());
     } else if(arg && !strcmp(arg,"STATUS")) {
       Serial.printf("HOST %s\n",cameraHostState());
-    } else Serial.println("ERR HOST_USE_START_OR_STATUS");
+    } else if(arg && !strcmp(arg,"LOG")) {
+      Serial.print(cameraHostDiagnostics());
+    } else Serial.println("ERR HOST_USE_START_STATUS_OR_LOG");
   }
   else if (!strcmp(cmd, "WIFI")) {
     Serial.printf("WIFI %s SSID %s\n", wifiReady() ? "READY" : "DISCONNECTED",
@@ -237,6 +239,9 @@ void handleLine(char *command) {
   } else Serial.println("ERR UNKNOWN_COMMAND");
 }
 static void startTelemetryServer() {
+  telemetryServer.on("/diagnostics",HTTP_GET,[](){
+    telemetryServer.send(200,"text/plain",cameraHostDiagnostics());
+  });
   telemetryServer.on("/health",HTTP_GET,[](){
     String content=String("{\"device\":\"midnight-esp32s3\",\"host\":\"")
         +cameraHostState()+"\",\"tracker_wifi\":"
