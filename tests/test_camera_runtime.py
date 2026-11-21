@@ -31,7 +31,7 @@ STUBS = r"""
 #define ASTRO_ACTION_AUTOFOCUS 3
 #define ASTRO_SHORTCUT_OFF 0
 #define ASTRO_SHORTCUT_LIGHT 3
-static int model,firmware_ok,worker_start_ok=1,starts,menus,requests,readout;
+static int model,firmware_ok,worker_start_ok=1,starts,menus,requests,readout,ptp_regs;
 static int lv=1,astro_cfg_focus_shortcut=3;
 struct event {int type,param;};
 static const char *models[] = { MODEL_NAMES };
@@ -41,6 +41,8 @@ int is_camera(const char *name,const char *firmware){
  return !strcmp(name,models[model]) && !strcmp(firmware,versions[model]);
 }
 static int astro_worker_start(void){starts++;return worker_start_ok;}
+/* Camera PTP registration is tested at protocol level, not by this UI harness. */
+static int astro_ptp_register(void){ptp_regs++;return 0;}
 static void astro_menu_add(void){menus++;}
 static int is_movie_mode(void){return 0;}
 static int display_idle(void){return 1;}
@@ -53,7 +55,7 @@ static void toggle_readout(void){readout++;}
 WRAPPERS = r"""
 void reset(int m,int firmware_valid,int shortcut){
  model=m; firmware_ok=firmware_valid; worker_start_ok=1;
- starts=menus=requests=readout=0;astro_cfg_focus_shortcut=shortcut;
+ starts=menus=requests=readout=ptp_regs=0;astro_cfg_focus_shortcut=shortcut;
 }
 unsigned init(void){return astro_init();}
 int raw(int key){
@@ -62,7 +64,7 @@ int raw(int key){
 }
 int get(int which){
  return which==0?starts:which==1?menus:which==2?requests:
-        which==3?readout:astro_cfg_focus_shortcut;
+        which==3?readout:which==4?astro_cfg_focus_shortcut:ptp_regs;
 }
 int sensor(void){return astro_sensor_width_x10();}
 """
@@ -110,7 +112,7 @@ def test_camera_profiles_support_and_raw_buttons():
             lib.reset(index, 1, 3)
             assert lib.init() == 0, camera.platform
             assert lib.sensor() == camera.sensor_width_x10
-            assert lib.get(0) == 1 and lib.get(1) == 1
+            assert lib.get(0) == 1 and lib.get(1) == 1 and lib.get(5) == 1
             assert lib.get(4) == (3 if camera.raw_focus_key >= 0 else 0)
             for key in (0, 4, 7, 8, 15, 29, 32, 36, 107, 111):
                 expected = 0 if key == camera.raw_focus_key else 1
@@ -124,6 +126,6 @@ def test_camera_profiles_support_and_raw_buttons():
             lib.reset(index, 0, 3)
             assert lib.init() == 1
             assert lib.sensor() == 0
-            assert lib.get(0) == lib.get(1) == 0
+            assert lib.get(0) == lib.get(1) == lib.get(5) == 0
         lib.reset(0, 1, 3)
         assert lib.init() == 1 and lib.sensor() == 0

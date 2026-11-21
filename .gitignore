@@ -8,3 +8,6 @@ modules/astro/build/
 tests/build/
 .pytest_cache/
 **/__pycache__/
+
+# Local hardware recovery backup (private, do not commit)
+controller/esp32s3-original-flash.bin

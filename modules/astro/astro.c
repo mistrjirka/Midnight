@@ -13,6 +13,7 @@
 #include "star_focus.h"
 #include "state.h"
 #include "worker.h"
+#include "astro_ptp.h"
 
 static unsigned int astro_init(void)
 {
@@ -30,10 +31,20 @@ static unsigned int astro_init(void)
         return CBR_RET_ERROR;
     }
     astro_menu_add();
+    /* Canon does not expose a PTP unregister call. Once registered, prevent
+     * unloading code referenced by Canon's USB handler until camera reboot. */
+    astro_ptp_register();
     return 0;
 }
 
 static unsigned int astro_deinit(void)
+{
+    /* A registered Canon PTP callback cannot be safely removed without a
+     * restart. Never leave a callback pointing into an unloaded module. */
+    return CBR_RET_ERROR;
+}
+#if 0
+static unsigned int astro_deinit_old(void)
 {
     if (!astro_worker_stop()) {
         return CBR_RET_ERROR; /* still working: refuse to unload */
@@ -42,6 +53,8 @@ static unsigned int astro_deinit(void)
     astro_menu_remove();
     return 0;
 }
+
+#endif
 
 /* Translated keys. Return 1 to let Canon handle the key, 0 to consume it. */
 static unsigned int astro_keypress(unsigned int key)

@@ -11,6 +11,7 @@
 #include "live.h"
 #include "state.h"
 #include "worker.h"
+#include "astro_telemetry.h"
 
 /* A focal-length hint narrows the search, so each update is much faster. */
 #define HINTED_BUDGET_MS 8000
@@ -38,7 +39,9 @@ void astro_live_loop(astro_live_frame_fn on_frame, void *context, astro_live_sta
     astro_hud("Hold still...   Q: stop", COLOR_WHITE);
     while (keep_running()) {
         astro_solve_status status = ASTRO_SOLVE_FEW_STARS;
+        uint32_t captured_at_ms = 0;
         if (astro_capture_display(image)) {
+            captured_at_ms=(uint32_t)get_ms_clock();
             status = astro_solve_frame(image, budget, &result);
         }
         if (!keep_running()) {
@@ -46,6 +49,12 @@ void astro_live_loop(astro_live_frame_fn on_frame, void *context, astro_live_sta
         }
         stats->frames++;
         stats->solved += status == ASTRO_SOLVE_OK;
+        if (status == ASTRO_SOLVE_OK) {
+            astro_telemetry_publish(captured_at_ms,
+                                    result.sky.ra, result.sky.dec,
+                                    (uint16_t)result.sky.fov_cdeg,
+                                    (uint16_t)result.sky.matched, ASTRO_SOURCE_GUIDE);
+        }
         on_frame(context, status, &result);
         msleep(PAUSE_MS);
     }

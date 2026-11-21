@@ -16,6 +16,7 @@
 #include "solve_actions.h"
 #include "state.h"
 #include "worker.h"
+#include "astro_telemetry.h"
 
 #define SOLVE_BUDGET_MS 45000
 #define NOTIFY_MS       4500
@@ -136,6 +137,11 @@ void astro_playback_run_solve(void)
         fail_playback("Photo changed; result hidden");
     } else {
         astro_remember_solution(&pb.result);
+        astro_telemetry_publish((uint32_t)get_ms_clock(),
+                                pb.result.sky.ra, pb.result.sky.dec,
+                                (uint16_t)pb.result.sky.fov_cdeg,
+                                (uint16_t)pb.result.sky.matched,
+                                ASTRO_SOURCE_GALLERY);
         astro_set_status("Solved %d stars", pb.result.sky.matched);
         pb.state = VIEW_RESULTS;
         draw_results();

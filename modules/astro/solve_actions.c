@@ -11,6 +11,7 @@
 #include "solve_actions.h"
 #include "state.h"
 #include "worker.h"
+#include "astro_telemetry.h"
 
 #define SETTLE_MS       3000 /* let tripod vibration die down; not an exposure */
 #define SETTLE_STEP_MS  100
@@ -105,6 +106,7 @@ void astro_run_solve(int from_test_file)
         return;
     }
 
+    const uint32_t captured_at_ms = (uint32_t)get_ms_clock();
     astro_solve_status status = astro_solve_frame(image, SOLVE_BUDGET_MS, &result);
     astro_solve_release();
     if (status != ASTRO_SOLVE_OK) {
@@ -114,6 +116,11 @@ void astro_run_solve(int from_test_file)
     }
     astro_build_overlay(&result, &result_scene);
     astro_remember_solution(&result);
+    astro_telemetry_publish(captured_at_ms,
+                            result.sky.ra, result.sky.dec,
+                            (uint16_t)result.sky.fov_cdeg,
+                            (uint16_t)result.sky.matched,
+                            from_test_file ? ASTRO_SOURCE_TEST : ASTRO_SOURCE_LIVE);
     astro_set_status("Solved %d stars in %d.%02d s", result.sky.matched, result.elapsed_ms / 1000,
                      result.elapsed_ms % 1000 / 10);
     astro_log("%s", astro_status());
