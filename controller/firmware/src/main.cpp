@@ -217,12 +217,18 @@ void handleLine(char *command) {
       Serial.println("ERR SLEW_ARGUMENTS"); return;
     }
     if (needStop) { Serial.println("ERR SLEW_STOP_PENDING"); return; }
+    // A lost HTTP reply does not mean the tracker ignored the start command.
+    // Arm the STOP before the first request, including failure/timeout paths.
+    needStop = true;
+    stopAt = millis() + ms;
     String output;
     if (get(String("/startslew?speed=")+speed+"&direction="+dir,output)) {
-      needStop = true;
-      stopAt = millis() + ms;
-      Serial.printf("OK SLEW_STARTED %ld ms (will stop automatically)\n",ms);
-    } else Serial.printf("ERR SLEW_START %s\n", output.c_str());
+      Serial.printf("OK SLEW_REQUESTED %ld ms (best-effort stop)\n",ms);
+    } else {
+      Serial.printf("ERR SLEW_START %s (sending STOP anyway)\n",output.c_str());
+      stopAt = 0;
+      stopSlew();
+    }
   }
   else if (!strcmp(cmd, "STOP")) {
     needStop = true;

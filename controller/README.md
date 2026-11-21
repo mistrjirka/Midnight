@@ -5,14 +5,14 @@ This bridge uses the ESP32-S3 Wi-Fi radio to control **only the right ascension 
 The firmware never moves the mount at startup. ESP32 USB serial at 115200 baud accepts:
 
 - `PING`, `WIFI`, `VERSION`, `STATUS`, `POSITION`
-- `POINT 1230000 -250000 12 200`: inject a verified test solution in 1e-4 degrees (RA, Dec, matched stars, FOV centidegrees). This does not move the mount.
+- `POINT 1230000 -250000 12 200`: inject a synthetic test solution in 1e-4 degrees (RA, Dec, matched stars, FOV centidegrees). This does not move the mount.
 - `GETPOINT`: read last reported pointing.
 - `TRACK 1 0 15956`: enable RA tracking (only on explicit request). `TRACK 0`: turn off.
-- `SLEW 0 200 400`: move RA in one direction for at most 200 ms. Max interval is 1000 ms. `STOP`: stop any pending manual slew.
+- `SLEW 0 200 400`: request an RA movement followed by a stop after 200 ms. Requested intervals cannot exceed 1000 ms, but network latency can extend actual motion. `STOP`: stop any pending manual slew.
 
 The ESP32 scans for SSIDs starting with `OG Star Tracker` (including factory suffixes) and connects using the factory default password, `password123`. Its HTTP calls target `192.168.4.1`. Set different credentials in ESP32 NVS under namespace `midnight` keys `ssid`, `password` before deployment if changed.
 
-**Important:** The tracker firmware has no guaranteed remote-stop watchdog. Wi-Fi loss during a manual slew can prevent a stop command. Supervise all physical slews and have direct power access.
+**Important:** The tracker firmware has no guaranteed remote-stop watchdog. Wi-Fi loss or HTTP timeout during a manual slew can delay or prevent the stop command. The bridge retries and attempts to stop even when the start response is lost. Supervise all physical slews and have direct power access.
 
 ## Build and flash
 
