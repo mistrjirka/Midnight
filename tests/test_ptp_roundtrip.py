@@ -27,6 +27,7 @@ struct ptp_context {
 };
 #define PTP_RC_OK 0x2001
 #define PTP_RC_GeneralError 0x2002
+#define PTP_RC_ParameterNotSupported 0x2006
 uint32_t ptp_register_handler(uint32_t id,
     int (*handler)(void*,struct ptp_context*,void*,void*),void* priv);
 uint32_t get_ms_clock(void);
@@ -39,11 +40,18 @@ CAMERA_HARNESS = r"""
 #include <string.h>
 #include "ptp.h"
 #include "astro_telemetry.h"
+#include "mount_mailbox.h"
 int astro_ptp_register(void);
 static int (*callback)(void*,struct ptp_context*,void*,void*)=NULL;
 static uint32_t opcode=0;
 static unsigned char output[96];
 static size_t outsize=0;
+static int registrations=0;
+static uint32_t lastCaptureId=0;
+int astro_mount_remote_enqueue(uint32_t id){
+    lastCaptureId=id;
+    return id==123?2:0;
+}
 static void put16(unsigned char *p,unsigned value) {p[0]=value&255;p[1]=(value>>8)&255;}
 static void put32(unsigned char *p,uint32_t v) {for(int i=0;i<4;i++)p[i]=(v>>(i*8))&255;}
 uint32_t get_ms_clock(void){return 175;}
@@ -53,7 +61,9 @@ void DryosDebugMsg(int channel,int level,const char *fmt,...){
 uint32_t ptp_register_handler(uint32_t op,
         int (*handler)(void*,struct ptp_context*,void*,void*),void* priv){
     (void)priv;
-    opcode=op;callback=handler;return 0;
+    registrations++;
+    if(op==0x9B32) {opcode=op;callback=handler;}
+    return 0;
 }
 static int send_data(struct ptp_handle *h,void *buffer,int len,int total,
                      int a,int b,int c){
@@ -66,7 +76,8 @@ static int send_data(struct ptp_handle *h,void *buffer,int len,int total,
 }
 static int send_resp(struct ptp_handle *h,struct ptp_msg *m){
     (void)h;
-    if(m->transaction!=9 || m->id!=PTP_RC_OK || outsize!=44)return 1;
+    if(m->transaction!=9 || (m->id!=PTP_RC_OK && m->id!=0x2019) ||
+       (outsize!=44 && outsize!=0))return 1;
     put32(output+outsize,12);put16(output+outsize+4,3);
     put16(output+outsize+6,m->id);put32(output+outsize+8,m->transaction);
     outsize+=12;
@@ -74,7 +85,8 @@ static int send_resp(struct ptp_handle *h,struct ptp_msg *m){
 }
 int main(void){
     astro_telemetry_publish(100,2350021,-145123,340,12,ASTRO_SOURCE_LIVE);
-    if(astro_ptp_register()!=0 || !callback || opcode!=0x9B32)return 2;
+    if(astro_ptp_register()!=0 || !callback || opcode!=0x9B32 ||
+       registrations!=3)return 2;
     union {
         int (*short_abi)(void*,struct ptp_context*,void*,void*);
         int (*actual)(void*,struct ptp_context*,uint32_t,uint32_t,uint32_t,
@@ -86,6 +98,16 @@ int main(void){
     if(cb.actual(NULL,&context,0x9B32,1,9,0,0,0,0,0)!=1)return 3;
     if(outsize!=56)return 4;
     fwrite(output,1,outsize,stdout);
+    astro_mount_mailbox_target(1234500,-120300);
+    outsize=0;opcode=0x9B34;
+    if(cb.actual(NULL,&context,0x9B34,1,9,0,0,0,0,0)!=1 ||
+       outsize!=56 || memcmp(output+12,"MNC1",4))return 5;
+    outsize=0;opcode=0x9B33;
+    if(cb.actual(NULL,&context,0x9B33,1,9,123,0,0,0,0)!=1 ||
+       outsize!=12 || lastCaptureId!=123 || output[6]!=1 || output[7]!=0x20)return 6;
+    outsize=0;
+    if(cb.actual(NULL,&context,0x9B33,1,9,999,0,0,0,0)!=1 ||
+       outsize!=12 || output[6]!=0x19 || output[7]!=0x20)return 7;
     return 0;
 }
 """
@@ -142,6 +164,7 @@ def test_camera_ptp_callback_to_esp32_decoder():
             "gcc", "-std=gnu99", "-O2", "-Wall", "-Wextra", "-Werror",
             f"-I{folder}", f"-I{ASTRO}", str(folder / "mock.c"),
             str(ASTRO / "astro_ptp.c"), str(ASTRO / "astro_telemetry.c"),
+            str(ASTRO / "mount_mailbox.c"),
             "-o", str(camera),
         ], check=True)
         subprocess.run([

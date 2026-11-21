@@ -20,6 +20,7 @@ typedef enum {
     ASTRO_ACTION_READ_LOCATION,
     ASTRO_ACTION_MOUNT_SYNC,
     ASTRO_ACTION_MOUNT_MEASURE,
+    ASTRO_ACTION_MOUNT_REMOTE_MEASURE,
     /* Background: dropped silently when the worker has anything else to do. */
     ASTRO_ACTION_FOCUS_SCORE,
     ASTRO_ACTION_LOOKUP_TARGET,

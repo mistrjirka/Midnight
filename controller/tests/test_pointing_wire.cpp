@@ -23,7 +23,14 @@ int main(){
     frame[25]=1;put32(frame+12,4000000);assert(!parseCameraPointing(frame,32,result));
     put32(frame+12,1234567);frame[26]=1;assert(!parseCameraPointing(frame,32,result));
     frame[26]=0; assert(!parseCameraPointing(frame,31,result));
-    put32(frame+28,12000); // stale image at read time
+    put32(frame+28,12000); // stale for Live View, still valid for a long still exposure
+    frame[24]=4;
+    assert(parseCameraPointing(frame,32,result));
+    assert(!usableLivePointing(result));
+    frame[24]=5;
+    assert(parseCameraPointing(frame,32,result));
+    assert(usableLivePointing(result));
+    put32(frame+28,75000); // stale even for a saved-photo measurement
     assert(parseCameraPointing(frame,32,result));
     assert(!usableLivePointing(result));
     puts("PASS: camera telemetry decoding, bounds, sources, malformed frames");

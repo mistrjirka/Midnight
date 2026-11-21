@@ -5,6 +5,9 @@
  */
 #include "camera_ptp_host.h"
 #include "ptp_wire.h"
+#include "mount_mailbox_wire.h"
+#include "mount_coordinator.h"
+#include <esp_system.h>
 #include <Arduino.h>
 #include <cstring>
 #include <cstdarg>
@@ -23,6 +26,8 @@ extern "C" void USBHostBoardInit(void);
 namespace {
 static constexpr uint16_t OP_OPEN_SESSION=0x1002;
 static constexpr uint16_t OP_MIDNIGHT_POINT=0x9B32;
+static constexpr uint16_t OP_CAPTURE_STILL=0x9B33;
+static constexpr uint16_t OP_MOUNT_MAILBOX=0x9B34;
 static constexpr uint16_t RESPONSE_OK=0x2001;
 static constexpr uint32_t POLL_INTERVAL_MS=1500;
 static constexpr uint32_t TRANSFER_TIMEOUT_MS=2000;
@@ -36,7 +41,17 @@ static volatile bool transferInFlight=false;
 static volatile bool running=false;
 static std::atomic<const char*> state{"OFF"};
 static uint32_t tid=0,lastPoll=0;
-static bool sessionOpened=false,claimed=false;
+static std::atomic<bool> sessionOpened{false};
+static bool claimed=false;
+static std::atomic<uint32_t> queuedPhotoId{0},activePhotoId{0};
+static std::atomic<CameraPhotoState> photoStatus{CameraPhotoState::IDLE};
+static std::atomic<uint32_t> lastIssuedPhotoId{0};
+static uint32_t photoStartedAt=0;
+static constexpr uint32_t CAPTURE_DEADLINE_MS=75000;
+static MountCoordinator navigation;
+static CameraMountMailbox lastMailbox={};
+static bool mailboxValid=false;
+static CameraMountView mountPublished={};
 static CameraPointing recent={};
 static uint32_t recentTime=0;
 static PtpWireReader wireReader;
@@ -61,6 +76,22 @@ static void hostLog(const char *fmt, ...) {
 }
 
 static portMUX_TYPE mutex=portMUX_INITIALIZER_UNLOCKED;
+static void publishMountSnapshot(){
+    CameraMountView snapshot={};
+    snapshot.mailbox=lastMailbox;
+    snapshot.mailboxValid=mailboxValid;
+    snapshot.navigation=navigation.state();
+    snapshot.targetActive=navigation.targetActive();
+    snapshot.targetRa=navigation.targetRa();
+    snapshot.targetDec=navigation.targetDec();
+    snapshot.lastPhotoRa=navigation.lastPhotoRa();
+    snapshot.lastPhotoDec=navigation.lastPhotoDec();
+    snapshot.photoState=photoStatus.load();
+    snapshot.lastRequestId=lastIssuedPhotoId.load();
+    portENTER_CRITICAL(&mutex);
+    mountPublished=snapshot;
+    portEXIT_CRITICAL(&mutex);
+}
 
 static void setState(const char *s) {
     const char* previous=state.exchange(s,std::memory_order_acq_rel);
@@ -219,6 +250,11 @@ static void disconnect() {
     if(claimed && device)usb_host_interface_release(client,device,iface);
     if(device)usb_host_device_close(client,device);
     device=nullptr;claimed=false;sessionOpened=false;gone=false;
+    if(activePhotoId.exchange(0) || queuedPhotoId.exchange(0))
+        photoStatus=CameraPhotoState::FAILED;
+    mailboxValid=false;
+    navigation.linkFailed();
+    publishMountSnapshot();
     setState("AWAIT_CAMERA");
 }
 static void newDevice(uint8_t address) {
@@ -292,27 +328,107 @@ static void clientTask(void*) {
             } else {setState("PTP_OPEN_ERROR");delay(800);}
             continue;
         }
+        /* Only this task owns the PTP transaction counter and bulk endpoints.
+         * HTTP/serial requests enqueue a photo but never touch USB directly. */
+        const uint32_t photo=queuedPhotoId.exchange(0);
+        if(photo){
+            const bool accepted=execute(OP_CAPTURE_STILL,true,photo);
+            if(accepted){
+                activePhotoId=photo;
+                photoStartedAt=millis();
+                photoStatus=CameraPhotoState::REQUESTED;
+                hostLog("camera_capture_accepted id=%lu",(unsigned long)photo);
+            }else{
+                photoStatus=CameraPhotoState::FAILED;
+                hostLog("camera_capture_rejected id=%lu",(unsigned long)photo);
+            }
+            navigation.photoSent(photo,accepted);
+            publishMountSnapshot();
+        }
         if(uint32_t(millis()-lastPoll)<POLL_INTERVAL_MS)continue;
         lastPoll=millis();
+
         uint8_t bytes[32]={};
-        if(!execute(OP_MIDNIGHT_POINT,false,0,bytes,sizeof(bytes))) {
-            setState("PTP_READ_ERROR");
-            continue;
+        if(execute(OP_MIDNIGHT_POINT,false,0,bytes,sizeof(bytes))) {
+            CameraPointing p={};
+            if(parseCameraPointing(bytes,sizeof(bytes),p) && p.valid) {
+                portENTER_CRITICAL(&mutex);
+                const bool newPoint=!recent.valid || recent.sequence!=p.sequence;
+                recent=p;recentTime=millis();
+                portEXIT_CRITICAL(&mutex);
+                if(newPoint)hostLog("point seq=%lu ra=%lu dec=%ld matches=%u src=%u age=%lu",
+                    (unsigned long)p.sequence,(unsigned long)p.ra,(long)p.dec,
+                    p.matches,p.source,(unsigned long)p.ageAtReadMs);
+                navigation.observePoint(p);
+                setState("POINT_READY");
+            } else {
+                if(p.valid)hostLog("point_rejected format_or_bounds");
+                setState("NO_VERIFIED_POINT");
+            }
+        }else setState("PTP_READ_ERROR");
+
+        uint8_t stateBytes[32]={};
+        if(execute(OP_MOUNT_MAILBOX,false,0,stateBytes,sizeof(stateBytes))){
+            CameraMountMailbox latest={};
+            if(parseMountMailbox(stateBytes,sizeof(stateBytes),latest)){
+                const uint32_t oldCmd=mailboxValid?lastMailbox.commandSequence:0;
+                lastMailbox=latest;
+                mailboxValid=true;
+                navigation.observeMailbox(latest);
+                if(latest.commandSequence!=oldCmd && latest.commandSequence){
+                    hostLog("camera_command seq=%lu cmd=%u ra=%lu dec=%ld",
+                        (unsigned long)latest.commandSequence,latest.command,
+                        (unsigned long)latest.targetRa,(long)latest.targetDec);
+                    if(latest.command==2){
+                        hostLog("camera_stop_navigation");
+                        if(queuedPhotoId.exchange(0)){
+                            photoStatus=CameraPhotoState::FAILED;
+                            hostLog("camera_cancelled_unstarted_capture");
+                        }
+                    }
+                }
+                const uint32_t active=activePhotoId.load();
+                if(active && latest.completedId==active &&
+                   latest.captureState==3){
+                    hostLog("camera_capture_failed id=%lu",(unsigned long)active);
+                    activePhotoId=0;
+                    photoStatus=CameraPhotoState::FAILED;
+                }else if(active && latest.completedId==active &&
+                         latest.captureState==2){
+                    CameraPointing point={};
+                    uint32_t at=0;
+                    if(cameraHostLatest(point,at) && point.source==5 &&
+                       point.sequence==latest.pointSequence &&
+                       usableLivePointing(point) &&
+                       uint32_t(millis()-at)+point.ageAtReadMs<65000){
+                        activePhotoId=0;
+                        photoStatus=CameraPhotoState::COMPLETE;
+                        hostLog("camera_capture_complete id=%lu seq=%lu",
+                            (unsigned long)active,(unsigned long)point.sequence);
+                    }
+                }
+            }else{
+                hostLog("camera_mailbox_invalid");
+                ptpErrors++;
+            }
+        }else{
+            hostLog("camera_mailbox_ptp_failed");
         }
-        CameraPointing p={};
-        if(parseCameraPointing(bytes,sizeof(bytes),p) && p.valid) {
-            portENTER_CRITICAL(&mutex);
-            const bool newPoint=!recent.valid || recent.sequence!=p.sequence;
-            recent=p;recentTime=millis();
-            portEXIT_CRITICAL(&mutex);
-            if(newPoint)hostLog("point seq=%lu ra=%lu dec=%ld matches=%u src=%u age=%lu",
-                (unsigned long)p.sequence,(unsigned long)p.ra,(long)p.dec,
-                p.matches,p.source,(unsigned long)p.ageAtReadMs);
-            setState("POINT_READY");
-        } else {
-            if(p.valid)hostLog("point_rejected format_or_bounds");
-            setState("NO_VERIFIED_POINT");
+        if(activePhotoId && uint32_t(millis()-photoStartedAt)>CAPTURE_DEADLINE_MS){
+            hostLog("camera_capture_timeout id=%lu",
+                    (unsigned long)activePhotoId.load());
+            activePhotoId=0;
+            photoStatus=CameraPhotoState::TIMED_OUT;
+            navigation.linkFailed();
         }
+        if(navigation.needsPhoto() && !activePhotoId && !queuedPhotoId){
+            uint32_t id=0;
+            if(cameraHostRequestMeasure(id)){
+                navigation.photoQueued(id);
+                hostLog("nav_requested_still id=%lu",(unsigned long)id);
+            }
+        }
+        publishMountSnapshot();
     }
 }
 }
@@ -364,4 +480,52 @@ String cameraHostDiagnostics(){
         result+=String(item.ms)+" "+item.message+"\n";
     }
     return result;
+}
+
+bool cameraHostRequestMeasure(uint32_t &id){
+    id=0;
+    if(!running || !sessionOpened.load() || activePhotoId.load() ||
+       queuedPhotoId.load())return false;
+    const CameraPhotoState status=photoStatus.load();
+    if(status==CameraPhotoState::QUEUED ||
+       status==CameraPhotoState::REQUESTED)return false;
+    uint32_t candidate=esp_random();
+    if(!candidate)candidate=1;
+    if(candidate==lastIssuedPhotoId.load())candidate++;
+    uint32_t expected=0;
+    if(!queuedPhotoId.compare_exchange_strong(expected,candidate))return false;
+    lastIssuedPhotoId=candidate;
+    photoStatus=CameraPhotoState::QUEUED;
+    id=candidate;
+    return true;
+}
+bool cameraHostMountView(CameraMountView &view){
+    portENTER_CRITICAL(&mutex);
+    view=mountPublished;
+    portEXIT_CRITICAL(&mutex);
+    return view.mailboxValid;
+}
+const char *cameraHostPhotoStatus(CameraPhotoState p){
+    switch(p){
+        case CameraPhotoState::IDLE:return "IDLE";
+        case CameraPhotoState::QUEUED:return "QUEUED";
+        case CameraPhotoState::REQUESTED:return "REQUESTED";
+        case CameraPhotoState::COMPLETE:return "COMPLETE";
+        case CameraPhotoState::FAILED:return "FAILED";
+        case CameraPhotoState::TIMED_OUT:return "TIMED_OUT";
+    }
+    return "INVALID";
+}
+const char *cameraHostNavigationStatus(MountNavState p){
+    switch(p){
+        case MountNavState::IDLE:return "IDLE";
+        case MountNavState::REQUEST_PHOTO:return "REQUEST_PHOTO";
+        case MountNavState::QUEUED:return "PHOTO_QUEUED";
+        case MountNavState::WAIT_PHOTO:return "WAIT_PHOTO";
+        case MountNavState::WAIT_POINT:return "WAIT_POINT";
+        case MountNavState::MOTORS_UNAVAILABLE:return "MOTORS_UNAVAILABLE";
+        case MountNavState::FAILED:return "FAILED";
+        case MountNavState::STOPPED:return "STOPPED";
+    }
+    return "INVALID";
 }

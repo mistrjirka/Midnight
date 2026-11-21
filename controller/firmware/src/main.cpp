@@ -26,6 +26,7 @@ String password = kDefaultPassword;
 String joinedSsid;
 uint32_t reconnectAt = 0, stopAt = 0;
 bool needStop = false;
+uint32_t lastCameraStopCommand = 0;
 char line[192];
 size_t lineSize = 0;
 
@@ -141,8 +142,9 @@ void handleLine(char *command) {
   if (!cmd) return;
   if (!strcmp(cmd, "PING")) Serial.println("OK MIDNIGHT_BRIDGE_V1");
   else if (!strcmp(cmd, "HELP")) Serial.println(
-    "COMMANDS: PING WIFI SCAN HOST STATUS VERSION POSITION POINT GETPOINT "
-    "TRACK 0|1 [0|1] [rate] SLEW 0|1 duration_ms [speed_2_to_400] STOP");
+    "COMMANDS: PING WIFI SCAN HOST STATUS|LOG CAMERA STATUS|MEASURE|TARGET "
+    "VERSION POSITION POINT GETPOINT TRACK 0|1 [0|1] [rate] "
+    "SLEW 0|1 duration_ms [speed_2_to_400] STOP");
   else if (!strcmp(cmd, "SCAN")) {
     WiFi.disconnect(false, false);
     delay(350);
@@ -165,6 +167,34 @@ void handleLine(char *command) {
     } else if(arg && !strcmp(arg,"LOG")) {
       Serial.print(cameraHostDiagnostics());
     } else Serial.println("ERR HOST_USE_START_STATUS_OR_LOG");
+  }
+  else if (!strcmp(cmd, "CAMERA")) {
+    const char *arg=strtok_r(nullptr," \t",&save);
+    if(arg && !strcmp(arg,"MEASURE")){
+      uint32_t requestId=0;
+      if(cameraHostRequestMeasure(requestId))
+        Serial.printf("OK CAMERA_PHOTO_QUEUED id=%lu\n",(unsigned long)requestId);
+      else Serial.println("ERR CAMERA_NOT_READY_OR_BUSY");
+    }else if(arg && (!strcmp(arg,"STATUS") || !strcmp(arg,"TARGET"))){
+      CameraMountView view={};
+      cameraHostMountView(view);
+      Serial.printf("CAMERA host=%s mailbox=%s state=%s photo=%s id=%lu\n",
+                    cameraHostState(),view.mailboxValid?"OK":"NO",
+                    cameraHostNavigationStatus(view.navigation),
+                    cameraHostPhotoStatus(view.photoState),
+                    (unsigned long)view.lastRequestId);
+      if(view.mailboxValid){
+        Serial.printf("CAMERA target_seq=%lu command=%u target=%lu,%ld "
+                      "requested=%lu completed=%lu capture_state=%u point_seq=%lu\n",
+                      (unsigned long)view.mailbox.commandSequence,
+                      view.mailbox.command,(unsigned long)view.mailbox.targetRa,
+                      (long)view.mailbox.targetDec,
+                      (unsigned long)view.mailbox.requestedId,
+                      (unsigned long)view.mailbox.completedId,
+                      view.mailbox.captureState,
+                      (unsigned long)view.mailbox.pointSequence);
+      }
+    }else Serial.println("ERR CAMERA_USE_STATUS_TARGET_OR_MEASURE");
   }
   else if (!strcmp(cmd, "WIFI")) {
     Serial.printf("WIFI %s SSID %s\n", wifiReady() ? "READY" : "DISCONNECTED",
@@ -242,6 +272,32 @@ static void startTelemetryServer() {
   telemetryServer.on("/diagnostics",HTTP_GET,[](){
     telemetryServer.send(200,"text/plain",cameraHostDiagnostics());
   });
+  telemetryServer.on("/mount",HTTP_GET,[](){
+    CameraMountView view={};
+    cameraHostMountView(view);
+    String response=String("{\"camera_host\":\"")+cameraHostState()
+      +"\",\"mailbox_valid\":"+(view.mailboxValid?"true":"false")
+      +",\"navigation\":\""+cameraHostNavigationStatus(view.navigation)
+      +"\",\"photo_status\":\""+cameraHostPhotoStatus(view.photoState)
+      +"\",\"photo_id\":"+String(view.lastRequestId)
+      +",\"target_valid\":"+(view.targetActive?"true":"false")
+      +",\"target_ra_e4\":"+String(view.targetRa)
+      +",\"target_dec_e4\":"+String(view.targetDec)
+      +",\"last_photo_ra_e4\":"+String(view.lastPhotoRa)
+      +",\"last_photo_dec_e4\":"+String(view.lastPhotoDec)
+      +",\"motor_control_enabled\":false}";
+    telemetryServer.send(200,"application/json",response);
+  });
+  telemetryServer.on("/measure",HTTP_POST,[](){
+    uint32_t requestId=0;
+    if(!cameraHostRequestMeasure(requestId)){
+      telemetryServer.send(409,"application/json",
+        "{\"accepted\":false,\"reason\":\"CAMERA_NOT_READY_OR_BUSY\"}");
+      return;
+    }
+    telemetryServer.send(202,"application/json",
+      String("{\"accepted\":true,\"request_id\":")+requestId+"}");
+  });
   telemetryServer.on("/health",HTTP_GET,[](){
     String content=String("{\"device\":\"midnight-esp32s3\",\"host\":\"")
         +cameraHostState()+"\",\"tracker_wifi\":"
@@ -262,7 +318,7 @@ static void startTelemetryServer() {
       response+=",\"source\":"+String(cp.source);
       response+=",\"sequence\":"+String(cp.sequence);
       response+=",\"age_ms\":"+String(age+cp.ageAtReadMs);
-      response+=",\"live_and_fresh\":"+String(usableLivePointing(cp) && age+cp.ageAtReadMs<(cp.source==5?45000u:10000u)?"true":"false");
+      response+=",\"live_and_fresh\":"+String(usableLivePointing(cp) && age+cp.ageAtReadMs<(cp.source==5?65000u:10000u)?"true":"false");
     }
     telemetryServer.send(200,"application/json",response+"}");
   });
@@ -284,6 +340,16 @@ void setup() {
 }
 void loop() {
   telemetryServer.handleClient();
+  /* A STOP button on the camera cancels navigation and forces any pending
+   * manual RA slew to stop. No new mount motion is ever triggered by USB. */
+  CameraMountView camera={};
+  if(cameraHostMountView(camera) &&
+     camera.mailbox.command==2 &&
+     camera.mailbox.commandSequence!=lastCameraStopCommand){
+    lastCameraStopCommand=camera.mailbox.commandSequence;
+    needStop=true;stopAt=0;
+    Serial.println("CAMERA STOP_REQUESTED");
+  }
   if (needStop && (int32_t)(millis() - stopAt) >= 0) {
     stopSlew();
   }

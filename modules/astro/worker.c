@@ -149,6 +149,9 @@ static void run(astro_action action)
         case ASTRO_ACTION_MOUNT_MEASURE:
             astro_mount_measure_photo();
             break;
+        case ASTRO_ACTION_MOUNT_REMOTE_MEASURE:
+            astro_mount_remote_measure();
+            break;
         default:
             break;
     }

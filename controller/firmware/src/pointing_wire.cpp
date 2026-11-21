@@ -32,8 +32,8 @@ bool parseCameraPointing(const uint8_t *p, size_t n, CameraPointing &out) {
 }
 bool usableLivePointing(const CameraPointing &p) {
     /* Normal still-photo solves may need longer card I/O and star matching.
-     * Reject stale data after 45s. Live View remains limited to 10s. */
-    const uint32_t limit=p.source==5 ? 45000 : 10000;
+     * Allow up to 65s for slow Canon still-photo solving; Live View stays 10s. */
+    const uint32_t limit=p.source==5 ? 65000 : 10000;
     return p.valid && (p.source==1 || p.source==4 || p.source==5) &&
            p.matches>=8 && p.ageAtReadMs<limit;
 }

@@ -124,7 +124,25 @@ MENU_SELECT_FUNC(astro_menu_mount_measure)
 
 MENU_SELECT_FUNC(astro_menu_mount_goto)
 {
-    astro_mount_goto_unavailable();
+    if(!astro_target_current() || !astro_target_get() || !astro_target_get()->valid){
+        astro_set_status("Select a valid Target first");
+        NotifyBox(4000,"Mount: choose Target in Midnight");
+        return;
+    }
+    const astro_dso *t=&astro_target_get()->object;
+    if(!astro_mount_send_selected_target(t->ra,t->dec)){
+        astro_set_status("Mount: invalid target coordinates");
+        return;
+    }
+    astro_set_status("Target sent to ESP32 (motors not armed)");
+    NotifyBox(4000,"Mount: target queued for ESP32");
+    gui_stop_menu(); /* The ESP will soon request a normal still exposure. */
+}
+MENU_SELECT_FUNC(astro_menu_mount_stop)
+{
+    astro_mount_abort_target();
+    astro_set_status("Mount: stop requested");
+    NotifyBox(4000,"Mount: STOP queued for ESP32");
 }
 
 MENU_UPDATE_FUNC(astro_menu_mount_status)
@@ -148,7 +166,7 @@ MENU_UPDATE_FUNC(astro_menu_mount_exposure_update)
 
 MENU_UPDATE_FUNC(astro_menu_mount_goto_update)
 {
-    MENU_SET_VALUE("Not ready");
+    MENU_SET_VALUE("Send");
 }
 
 #define STATUS_MENU_BYTES 25 /* fits beside "Solve Live View (3s)" */

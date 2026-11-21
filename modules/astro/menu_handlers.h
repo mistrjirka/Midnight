@@ -20,6 +20,7 @@ MENU_SELECT_FUNC(astro_menu_start_read_location);
 MENU_SELECT_FUNC(astro_menu_mount_sync);
 MENU_SELECT_FUNC(astro_menu_mount_measure);
 MENU_SELECT_FUNC(astro_menu_mount_goto);
+MENU_SELECT_FUNC(astro_menu_mount_stop);
 MENU_UPDATE_FUNC(astro_menu_mount_status);
 MENU_UPDATE_FUNC(astro_menu_mount_delta);
 MENU_UPDATE_FUNC(astro_menu_mount_goto_update);

@@ -21,6 +21,7 @@ typedef enum {
     ASTRO_ACTION_POLAR_SECOND, ASTRO_ACTION_POLAR_ADJUST, ASTRO_ACTION_AUTOFOCUS,
     ASTRO_ACTION_MEASURE_FOCUS, ASTRO_ACTION_READ_LOCATION,
     ASTRO_ACTION_MOUNT_SYNC, ASTRO_ACTION_MOUNT_MEASURE,
+    ASTRO_ACTION_MOUNT_REMOTE_MEASURE,
     ASTRO_ACTION_FOCUS_SCORE, ASTRO_ACTION_LOOKUP_TARGET, ASTRO_ACTION_QUIT
 } astro_action;
 #define ASTRO_IMAGE_BYTES (360*240)
@@ -69,6 +70,7 @@ static void astro_target_lookup(void){actions++;}
 static void astro_location_read_last_photo(void){actions++;}
 static void astro_mount_sync_photo(void){actions++;}
 static void astro_mount_measure_photo(void){actions++;}
+static void astro_mount_remote_measure(void){actions++;}
 """
 MAIN=r"""
 int main(void){

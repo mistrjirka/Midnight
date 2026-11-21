@@ -2,10 +2,16 @@
  * plate-solved photos, not from assumed perpendicular motor axes.
  */
 #include <dryos.h>
+#include <stdio.h>
 #include <notify_box.h>
+#include <gui-common.h>
+#include <propvalues.h>
+#include <property.h>
+#include <shoot.h>
 #include "mount_control.h"
 #include "mount_photo.h"
 #include "mount_model.h"
+#include "mount_mailbox.h"
 #include "astro_telemetry.h"
 #include "solve.h"
 #include "solve_actions.h"
@@ -57,10 +63,13 @@ void astro_mount_sync_photo(void)
        (unsigned long)((p.dec<0?-p.dec:p.dec)%10000));
     result_to_screen();
 }
-void astro_mount_measure_photo(void)
+static int measure_move(int show_notification)
 {
     mount_point p={0};
-    if(!measure(&p)){result_to_screen();return;}
+    if(!measure(&p)){
+        if(show_notification)result_to_screen();
+        return 0;
+    }
     if(has_reference){
         int32_t x,y;
         if(mount_displacement(previous,p,&x,&y)){
@@ -75,7 +84,45 @@ void astro_mount_measure_photo(void)
     } else astro_set_status("Mount: position measured, not synced");
     previous=p;has_reference=1;
     mount_set_current(&calibrated,p);
-    result_to_screen();
+    if(show_notification)result_to_screen();
+    return 1;
+}
+void astro_mount_measure_photo(void)
+{
+    (void)measure_move(1);
+}
+int astro_mount_remote_enqueue(uint32_t request_id)
+{
+    /* Camera must be idle in manual still mode. Never release the shutter
+     * while Canon playback, a menu, movie mode or Live View is active. */
+    if(gui_menu_shown() || is_play_or_qr_mode() || is_movie_mode() || lv ||
+       shooting_mode!=SHOOTMODE_M)return 0;
+    const int state=astro_mount_mailbox_begin(request_id);
+    if(state!=2)return state; /* 1 means acknowledged duplicate, 0 means busy */
+    if(!astro_request(ASTRO_ACTION_MOUNT_REMOTE_MEASURE)){
+        astro_mount_mailbox_complete(request_id,0,0);
+        return 0;
+    }
+    return 2;
+}
+void astro_mount_remote_measure(void)
+{
+    /* Request ID is saved before queueing so the worker cannot finish
+     * before we know which USB command initiated this measurement. */
+    const uint32_t request_id=astro_mount_mailbox_last_requested();
+    const int ok=measure_move(0);
+    astro_mount_mailbox_complete(request_id,ok,
+       ok?astro_telemetry_current_sequence():0);
+}
+int astro_mount_send_selected_target(uint32_t ra,int32_t dec)
+{
+    return astro_mount_mailbox_target(ra,dec);
+}
+void astro_mount_abort_target(void)
+{
+    astro_mount_mailbox_stop();
+    if(astro_running_action()==ASTRO_ACTION_MOUNT_REMOTE_MEASURE)
+        astro_cancel();
 }
 void astro_mount_status_menu(char *out,int size)
 {

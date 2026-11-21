@@ -20,7 +20,9 @@ From `controller/firmware` run `../.venv/bin/pio run -e esp32s3`, then `../.venv
 
 ## Camera USB host and telemetry
 
-The firmware includes a read-only Canon PTP USB host. It stays **off** at startup because the ESP32-S3 shares the internal USB PHY between native USB serial/JTAG and USB OTG. Use `HOST START` to switch to host mode after making the camera-side USB wiring ready. The debug USB serial connection can disappear. Reboot the board to restore USB serial.
+The firmware includes a Canon PTP USB host that can request a still
+exposure, receive verified coordinates, and poll the target the user selected
+on the camera. It stays **off** at startup because the ESP32-S3 shares the internal USB PHY between native USB serial/JTAG and USB OTG. Use `HOST START` to switch to host mode after making the camera-side USB wiring ready. The debug USB serial connection can disappear. Reboot the board to restore USB serial.
 
 Power the Canon normally and provide USB host VBUS from a suitable powered OTG adapter. Verify the exact ESP32-S3 board USB wiring first. Do not connect 5 V directly to the ESP32-S3 data pins.
 
@@ -66,3 +68,27 @@ The camera module also accepts solved normal still-photo measurements as
 telemetry source 5. The ESP32 rejects source 2 (gallery) and source 3 (test)
 for any future motion, and uses strict age checks for still measurements.
 Automatic GoTo and secondary-axis control remain disabled.
+
+
+## Camera-selected target and controller-requested images
+
+- Camera: select Target in Midnight, then press GoTo target. The camera
+  publishes the J2000 RA/Dec and a monotonic command sequence. It then closes
+  the menu so the ESP32 can request an ordinary saved still photo.
+- ESP32: polls PTP operation 0x9B34 for the target and command. On a new
+  target, queues a single still photo via 0x9B33 with a unique request ID.
+  It reads the completed request ID and fresh pointing from 0x9B32.
+- ESP32: owns the skewed, two-axis mathematical model and navigation state.
+  It does not automatically move motors until the second driver and the
+  USB host's electrical wiring are verified.
+- Camera Stop mount: publishes an abort, cancels any active camera worker,
+  and makes the ESP32 attempt an RA stop.
+
+While the ESP32 is on the tracker Wi-Fi AP, use the new endpoints:
+- GET /mount: target, navigation, last photo and disabled-motor status.
+- POST /measure: request a new still. HTTP 202 includes the request ID;
+  409 indicates the camera is offline/busy.
+- GET /diagnostics: USB/PTP logs.
+
+Before USB host mode, serial commands CAMERA STATUS, CAMERA TARGET and
+CAMERA MEASURE inspect the same state or queue a photo.

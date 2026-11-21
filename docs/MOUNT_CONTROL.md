@@ -13,7 +13,8 @@
 | Exposure | 1 or 2 seconds (default 2) |
 | Position | Last verified RA/Dec |
 | Last movement | Last measured east/north displacement |
-| GoTo target | **Not ready** until USB command transport and both motors are calibrated |
+| GoTo target | **Send**: publish the selected target for ESP32-controlled navigation |
+| Stop mount | Publish Stop and cancel controller navigation |
 
 The measurement path does **not** use the Live View feature, its digital gain, or an amplified Live View frame. In Manual photo mode, it temporarily requests the camera's maximum *analogue* ISO, widest electronically controlled aperture (lowest f-number), and 1 or 2 second shutter. It then triggers a standard still photo without autofocus, waits for the camera file number to advance, and plate-solves the Canon saved-photo playback preview. Camera settings are restored even if capture fails. Open manual-aperture lenses physically.
 
@@ -36,3 +37,20 @@ The pure-C `mount_model.c` already implements axis-vector estimation, RA wrap ha
 **GoTo is intentionally disabled:** a physical Canon USB host connection is not verified, the camera-to-ESP motion command and acknowledgement channel is not implemented, and the secondary motor driver and GPIO/power wiring are not known. The existing ESP32 firmware controls the OG Star Tracker's RA motor only. No automatic motor action occurs on camera startup or after Sync.
 
 The mount should not assume arbitrary sidereal drift subtraction. With RA tracking enabled, the before/after measured offset already includes any tracking error. Re-solving after each move is the feedback signal.
+
+
+## Actual controller-owned flow (software implemented)
+
+1. Select Target on the camera and press GoTo target.
+2. The ESP32 polls PTP 0x9B34 and receives the selected J2000 RA/Dec.
+3. The ESP32 requests a fresh saved still with a unique ID via 0x9B33.
+4. The camera worker captures, solves and publishes pointing via 0x9B32.
+5. The ESP32 checks the matching completion ID and fresh solve sequence.
+6. The ESP32's own copy of the arbitrary two-axis model can calculate
+   correction pulses after empirical motor calibration.
+7. Each future movement will be followed by another still photo and re-solve.
+
+Target transfer, remote photo requests, completion tracking and the
+controller's navigation state machine are implemented and unit-tested.
+**Actual motor GoTo stays disabled** until the USB connection and the
+second-axis motor/driver are physically tested.

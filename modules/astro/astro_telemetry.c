@@ -61,3 +61,11 @@ void astro_telemetry_encode(uint8_t out[ASTRO_TELEMETRY_BYTES],uint32_t read_ms)
     /* Retry later if writer is active; never invent a position. */
     memcpy(out,"MNT1",4);
 }
+
+uint32_t astro_telemetry_current_sequence(void)
+{
+    uint8_t snapshot[ASTRO_TELEMETRY_BYTES];
+    astro_telemetry_encode(snapshot,0);
+    return (uint32_t)snapshot[4] | ((uint32_t)snapshot[5]<<8) |
+           ((uint32_t)snapshot[6]<<16) | ((uint32_t)snapshot[7]<<24);
+}

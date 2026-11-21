@@ -14,4 +14,5 @@ void astro_telemetry_publish(uint32_t uptime_ms, uint32_t ra, int32_t dec,
                              uint16_t fov_cdeg, uint16_t matches, uint8_t source);
 /* Zero validity before the first verified solution; no fabricated pointing. */
 void astro_telemetry_encode(uint8_t out[ASTRO_TELEMETRY_BYTES], uint32_t read_ms);
+uint32_t astro_telemetry_current_sequence(void);
 #endif
